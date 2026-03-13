@@ -4,3 +4,7 @@ result-*
 
 # Ignore automatically generated direnv output
 .direnv
+
+# Zig
+.zig-cache/
+zig-out/
