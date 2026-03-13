@@ -149,10 +149,7 @@ pub const GameState = struct {
     }
 
     pub fn gameResult(self: *GameState) GameResult {
-        if (self.isInsufficientMaterial()) return .draw_insufficient;
-        if (self.isFiftyMoveRule()) return .draw_fifty_move;
-        if (self.isThreefoldRepetition()) return .draw_threefold;
-
+        // Check checkmate/stalemate first (FIDE rules: checkmate takes priority over draws)
         const legal = movegen.generateLegalMoves(&self.board);
         if (legal.count == 0) {
             if (self.isInCheck()) {
@@ -161,6 +158,10 @@ pub const GameState = struct {
                 return .draw_stalemate;
             }
         }
+
+        if (self.isInsufficientMaterial()) return .draw_insufficient;
+        if (self.isFiftyMoveRule()) return .draw_fifty_move;
+        if (self.isThreefoldRepetition()) return .draw_threefold;
 
         return .ongoing;
     }

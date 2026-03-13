@@ -152,7 +152,7 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
             };
 
             var san_buf: [16]u8 = undefined;
-            const san = notation.moveToSAN(move, &game.board, &san_buf);
+            const san = notation.moveToSAN(move, &game.board, &san_buf, null);
             game.makeMove(move);
             try stdout.print("Computer plays: {s}\n\n", .{san});
             try stdout.flush();
@@ -194,7 +194,7 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
                 try stdout.print("Legal moves ({d}):", .{legal.count});
                 for (legal.slice()) |move| {
                     var san_buf: [16]u8 = undefined;
-                    const san = notation.moveToSAN(move, &game.board, &san_buf);
+                    const san = notation.moveToSAN(move, &game.board, &san_buf, legal);
                     try stdout.print(" {s}", .{san});
                 }
                 try stdout.print("\n\n", .{});
@@ -219,7 +219,7 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
             // Parse move
             if (notation.parseMove(input, &game.board)) |move| {
                 var san_buf: [16]u8 = undefined;
-                const san = notation.moveToSAN(move, &game.board, &san_buf);
+                const san = notation.moveToSAN(move, &game.board, &san_buf, null);
                 game.makeMove(move);
                 try stdout.print("{s}\n\n", .{san});
                 try stdout.flush();

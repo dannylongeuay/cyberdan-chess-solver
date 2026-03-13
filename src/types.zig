@@ -14,6 +14,33 @@ pub const PieceType = enum(u3) {
     rook = 3,
     queen = 4,
     king = 5,
+
+    pub fn toChar(self: PieceType) u8 {
+        return switch (self) {
+            .pawn => 'p',
+            .knight => 'n',
+            .bishop => 'b',
+            .rook => 'r',
+            .queen => 'q',
+            .king => 'k',
+        };
+    }
+
+    pub fn fromChar(ch: u8) ?PieceType {
+        return switch (ch) {
+            'p', 'P' => .pawn,
+            'n', 'N' => .knight,
+            'b', 'B' => .bishop,
+            'r', 'R' => .rook,
+            'q', 'Q' => .queen,
+            'k', 'K' => .king,
+            else => null,
+        };
+    }
+
+    pub fn toUpperChar(self: PieceType) u8 {
+        return self.toChar() - 32;
+    }
 };
 
 pub const Piece = struct {

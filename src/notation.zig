@@ -48,6 +48,16 @@ pub fn parseMove(input: []const u8, board: *Board) ?Move {
     return parseSAN(trimmed, legal, board);
 }
 
+fn parsePromotionChar(ch: u8) ?PieceType {
+    return switch (ch) {
+        'q', 'Q' => .queen,
+        'r', 'R' => .rook,
+        'b', 'B' => .bishop,
+        'n', 'N' => .knight,
+        else => null,
+    };
+}
+
 fn tryLongAlgebraic(trimmed: []const u8, legal: MoveList) ?Move {
     const from_sq = Square.fromString(trimmed[0..2]) orelse return null;
     const to_sq = Square.fromString(trimmed[2..4]) orelse return null;
@@ -56,25 +66,11 @@ fn tryLongAlgebraic(trimmed: []const u8, legal: MoveList) ?Move {
 
     var promo_type: ?PieceType = null;
     if (trimmed.len >= 5) {
-        promo_type = switch (trimmed[4]) {
-            'q', 'Q' => .queen,
-            'r', 'R' => .rook,
-            'b', 'B' => .bishop,
-            'n', 'N' => .knight,
-            '=' => blk: {
-                if (trimmed.len >= 6) {
-                    break :blk switch (trimmed[5]) {
-                        'q', 'Q' => .queen,
-                        'r', 'R' => .rook,
-                        'b', 'B' => .bishop,
-                        'n', 'N' => .knight,
-                        else => null,
-                    };
-                }
-                break :blk null;
-            },
-            else => null,
-        };
+        if (trimmed[4] == '=') {
+            if (trimmed.len >= 6) promo_type = parsePromotionChar(trimmed[5]);
+        } else {
+            promo_type = parsePromotionChar(trimmed[4]);
+        }
     }
 
     for (legal.slice()) |move| {
@@ -180,13 +176,7 @@ fn parsePawnSAN(s: []const u8, legal: MoveList) ?Move {
         const last = input[input.len - 1];
         const second_last = input[input.len - 2];
         if (second_last == '=') {
-            promo_type = switch (last) {
-                'Q', 'q' => .queen,
-                'R', 'r' => .rook,
-                'B', 'b' => .bishop,
-                'N', 'n' => .knight,
-                else => null,
-            };
+            promo_type = parsePromotionChar(last);
             if (promo_type != null) {
                 input = input[0 .. input.len - 2];
             }
@@ -242,8 +232,9 @@ fn isCastlingQueenside(s: []const u8) bool {
     return std.mem.eql(u8, s, "O-O-O") or std.mem.eql(u8, s, "0-0-0");
 }
 
-/// Format a move in SAN notation
-pub fn moveToSAN(move: Move, board: *Board, buf: []u8) []const u8 {
+/// Format a move in SAN notation. If `legal_moves` is provided, it is used for
+/// disambiguation instead of regenerating legal moves internally.
+pub fn moveToSAN(move: Move, board: *Board, buf: []u8, legal_moves: ?MoveList) []const u8 {
     var idx: usize = 0;
 
     if (move.flags == .king_castle) {
@@ -260,18 +251,11 @@ pub fn moveToSAN(move: Move, board: *Board, buf: []u8) []const u8 {
         const piece_type = board.getPieceTypeAt(move.from, us_idx);
 
         if (piece_type != .pawn) {
-            buf[idx] = switch (piece_type) {
-                .knight => 'N',
-                .bishop => 'B',
-                .rook => 'R',
-                .queen => 'Q',
-                .king => 'K',
-                else => unreachable,
-            };
+            buf[idx] = piece_type.toUpperChar();
             idx += 1;
 
             // Disambiguation: check if another piece of same type can move to same square
-            const legal = movegen.generateLegalMoves(board);
+            const legal = legal_moves orelse movegen.generateLegalMoves(board);
             var need_file = false;
             var need_rank = false;
             for (legal.slice()) |other| {
@@ -318,13 +302,7 @@ pub fn moveToSAN(move: Move, board: *Board, buf: []u8) []const u8 {
         if (move.flags.isPromotion()) {
             buf[idx] = '=';
             idx += 1;
-            buf[idx] = switch (move.flags.promotionPieceType().?) {
-                .queen => 'Q',
-                .rook => 'R',
-                .bishop => 'B',
-                .knight => 'N',
-                else => unreachable,
-            };
+            buf[idx] = move.flags.promotionPieceType().?.toUpperChar();
             idx += 1;
         }
     }
@@ -359,13 +337,7 @@ pub fn moveToLongAlgebraic(move: Move, buf: []u8) []const u8 {
     buf[3] = t[1];
 
     if (move.flags.isPromotion()) {
-        buf[4] = switch (move.flags.promotionPieceType().?) {
-            .queen => 'q',
-            .rook => 'r',
-            .bishop => 'b',
-            .knight => 'n',
-            else => unreachable,
-        };
+        buf[4] = move.flags.promotionPieceType().?.toChar();
         return buf[0..5];
     }
 
@@ -424,7 +396,7 @@ test "SAN formatting" {
     const legal = movegen.generateLegalMoves(&board);
     for (legal.slice()) |move| {
         if (move.from == @intFromEnum(Square.e2) and move.to == @intFromEnum(Square.e4)) {
-            const san = moveToSAN(move, &board, &buf);
+            const san = moveToSAN(move, &board, &buf, legal);
             try std.testing.expectEqualStrings("e4", san);
             break;
         }

@@ -141,6 +141,36 @@ pub const Board = struct {
         self.hash ^= Zobrist.instance.piece_keys[c][p][from] ^ Zobrist.instance.piece_keys[c][p][to];
     }
 
+    // Hash-free variants for unmakeMove (hash is restored from undo info)
+    fn putPieceNoHash(self: *Board, sq: u6, piece: Piece) void {
+        const bit = @as(u64, 1) << sq;
+        const c = @intFromEnum(piece.color);
+        const p = @intFromEnum(piece.piece_type);
+        self.pieces[c][p] |= bit;
+        self.occupancy[c] |= bit;
+        self.all_occupancy |= bit;
+    }
+
+    fn removePieceNoHash(self: *Board, sq: u6, piece: Piece) void {
+        const bit = @as(u64, 1) << sq;
+        const c = @intFromEnum(piece.color);
+        const p = @intFromEnum(piece.piece_type);
+        self.pieces[c][p] &= ~bit;
+        self.occupancy[c] &= ~bit;
+        self.all_occupancy &= ~bit;
+    }
+
+    fn movePieceNoHash(self: *Board, from: u6, to: u6, piece: Piece) void {
+        const from_bit = @as(u64, 1) << from;
+        const to_bit = @as(u64, 1) << to;
+        const from_to = from_bit | to_bit;
+        const c = @intFromEnum(piece.color);
+        const p = @intFromEnum(piece.piece_type);
+        self.pieces[c][p] ^= from_to;
+        self.occupancy[c] ^= from_to;
+        self.all_occupancy ^= from_to;
+    }
+
     // Castling rights update mask: indexed by from/to square
     const castling_update = blk: {
         var table: [64]u4 = [_]u4{0b1111} ** 64;
@@ -263,43 +293,43 @@ pub const Board = struct {
         switch (flags) {
             .quiet => {
                 const pt = self.getPieceTypeAt(to, @intFromEnum(us));
-                self.movePiece(to, from, .{ .color = us, .piece_type = pt });
+                self.movePieceNoHash(to, from, .{ .color = us, .piece_type = pt });
             },
             .double_pawn_push => {
-                self.movePiece(to, from, .{ .color = us, .piece_type = .pawn });
+                self.movePieceNoHash(to, from, .{ .color = us, .piece_type = .pawn });
             },
             .king_castle => {
-                self.movePiece(to, from, .{ .color = us, .piece_type = .king });
+                self.movePieceNoHash(to, from, .{ .color = us, .piece_type = .king });
                 const rook_from: u6 = if (us == .white) @intFromEnum(Square.h1) else @intFromEnum(Square.h8);
                 const rook_to: u6 = if (us == .white) @intFromEnum(Square.f1) else @intFromEnum(Square.f8);
-                self.movePiece(rook_to, rook_from, .{ .color = us, .piece_type = .rook });
+                self.movePieceNoHash(rook_to, rook_from, .{ .color = us, .piece_type = .rook });
             },
             .queen_castle => {
-                self.movePiece(to, from, .{ .color = us, .piece_type = .king });
+                self.movePieceNoHash(to, from, .{ .color = us, .piece_type = .king });
                 const rook_from: u6 = if (us == .white) @intFromEnum(Square.a1) else @intFromEnum(Square.a8);
                 const rook_to: u6 = if (us == .white) @intFromEnum(Square.d1) else @intFromEnum(Square.d8);
-                self.movePiece(rook_to, rook_from, .{ .color = us, .piece_type = .rook });
+                self.movePieceNoHash(rook_to, rook_from, .{ .color = us, .piece_type = .rook });
             },
             .capture => {
                 const pt = self.getPieceTypeAt(to, @intFromEnum(us));
-                self.movePiece(to, from, .{ .color = us, .piece_type = pt });
-                self.putPiece(to, .{ .color = them, .piece_type = undo.captured_piece.? });
+                self.movePieceNoHash(to, from, .{ .color = us, .piece_type = pt });
+                self.putPieceNoHash(to, .{ .color = them, .piece_type = undo.captured_piece.? });
             },
             .ep_capture => {
-                self.movePiece(to, from, .{ .color = us, .piece_type = .pawn });
+                self.movePieceNoHash(to, from, .{ .color = us, .piece_type = .pawn });
                 const cap_sq: u6 = if (us == .white) to - 8 else to + 8;
-                self.putPiece(cap_sq, .{ .color = them, .piece_type = .pawn });
+                self.putPieceNoHash(cap_sq, .{ .color = them, .piece_type = .pawn });
             },
             .knight_promotion, .bishop_promotion, .rook_promotion, .queen_promotion => {
                 const promo_type = flags.promotionPieceType().?;
-                self.removePiece(to, .{ .color = us, .piece_type = promo_type });
-                self.putPiece(from, .{ .color = us, .piece_type = .pawn });
+                self.removePieceNoHash(to, .{ .color = us, .piece_type = promo_type });
+                self.putPieceNoHash(from, .{ .color = us, .piece_type = .pawn });
             },
             .knight_promo_capture, .bishop_promo_capture, .rook_promo_capture, .queen_promo_capture => {
                 const promo_type = flags.promotionPieceType().?;
-                self.removePiece(to, .{ .color = us, .piece_type = promo_type });
-                self.putPiece(from, .{ .color = us, .piece_type = .pawn });
-                self.putPiece(to, .{ .color = them, .piece_type = undo.captured_piece.? });
+                self.removePieceNoHash(to, .{ .color = us, .piece_type = promo_type });
+                self.putPieceNoHash(from, .{ .color = us, .piece_type = .pawn });
+                self.putPieceNoHash(to, .{ .color = them, .piece_type = undo.captured_piece.? });
             },
         }
 
@@ -378,15 +408,7 @@ pub const Board = struct {
             } else {
                 const color: Color = if (ch >= 'A' and ch <= 'Z') .white else .black;
                 const lower = if (ch >= 'A' and ch <= 'Z') ch + 32 else ch;
-                const pt: PieceType = switch (lower) {
-                    'p' => .pawn,
-                    'n' => .knight,
-                    'b' => .bishop,
-                    'r' => .rook,
-                    'q' => .queen,
-                    'k' => .king,
-                    else => return error.InvalidFen,
-                };
+                const pt: PieceType = PieceType.fromChar(lower) orelse return error.InvalidFen;
                 const sq = Square.fromRankFile(@intCast(rank_i), @intCast(file_i));
                 board.putPiece(@intFromEnum(sq), .{ .color = color, .piece_type = pt });
                 file_i += 1;
@@ -452,9 +474,11 @@ pub const Board = struct {
             board.fullmove_number = num;
         }
 
-        // Recompute hash from scratch (the putPiece calls already set piece hashes)
-        // but we need to add castling, EP, and side to move
-        board.hash = board.computeHash();
+        // putPiece calls already XORed piece keys into the hash;
+        // just add castling, EP, and side-to-move keys
+        if (board.side_to_move == .black) board.hash ^= Zobrist.instance.side_key;
+        board.hash ^= Zobrist.instance.castling_keys[board.castling.toInt()];
+        if (board.en_passant) |ep| board.hash ^= Zobrist.instance.en_passant_keys[ep & 7];
 
         return board;
     }
@@ -474,14 +498,7 @@ pub const Board = struct {
                         idx += 1;
                         empty = 0;
                     }
-                    const ch: u8 = switch (piece.piece_type) {
-                        .pawn => 'p',
-                        .knight => 'n',
-                        .bishop => 'b',
-                        .rook => 'r',
-                        .queen => 'q',
-                        .king => 'k',
-                    };
+                    const ch = piece.piece_type.toChar();
                     buf[idx] = if (piece.color == .white) ch - 32 else ch;
                     idx += 1;
                 } else {

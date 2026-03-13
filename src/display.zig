@@ -14,14 +14,7 @@ pub fn printBoard(b: *const Board, writer: anytype) !void {
         for (0..8) |file_i| {
             const sq = Square.fromRankFile(@intCast(rank_i), @intCast(file_i));
             const ch: u8 = if (b.pieceAt(@intFromEnum(sq))) |piece| blk: {
-                const c: u8 = switch (piece.piece_type) {
-                    .pawn => 'p',
-                    .knight => 'n',
-                    .bishop => 'b',
-                    .rook => 'r',
-                    .queen => 'q',
-                    .king => 'k',
-                };
+                const c = piece.piece_type.toChar();
                 break :blk if (piece.color == .white) c - 32 else c;
             } else ' ';
             try writer.print("| {c} ", .{ch});
