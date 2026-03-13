@@ -3,7 +3,6 @@ const types = @import("types.zig");
 const square_mod = @import("square.zig");
 const bb = @import("bitboard.zig");
 const attacks = @import("attacks.zig");
-const magics = @import("magics.zig");
 const moves_mod = @import("moves.zig");
 
 const Color = types.Color;
@@ -596,8 +595,6 @@ pub const Board = struct {
 };
 
 test "FEN roundtrip" {
-    magics.init();
-
     const fens = [_][]const u8{
         "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
         "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1",
@@ -614,8 +611,6 @@ test "FEN roundtrip" {
 }
 
 test "makeMove/unmakeMove restores board" {
-    magics.init();
-
     var board = Board.init();
     const original_hash = board.hash;
 

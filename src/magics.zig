@@ -148,107 +148,110 @@ const bishop_shift: u6 = 55; // 64 - 9
 const rook_table_size = 4096; // 2^12
 const bishop_table_size = 512; // 2^9
 
-// Runtime state
-var rook_masks_arr: [64]Bitboard = undefined;
-var bishop_masks_arr: [64]Bitboard = undefined;
-var rook_magic_arr: [64]u64 = undefined;
-var bishop_magic_arr: [64]u64 = undefined;
-var rook_table: [64][rook_table_size]Bitboard = undefined;
-var bishop_table: [64][bishop_table_size]Bitboard = undefined;
-var initialized = false;
+// Pre-computed magic numbers (deterministic PRNG output, hardcoded to avoid
+// expensive trial-and-error search at comptime)
+const rook_magic_numbers = [64]u64{
+    0x2080002880104000, 0x0004401001482004, 0x1002040100500014, 0x4008000902041018,
+    0x40400b8040081214, 0x914006a002140001, 0x0100240906420180, 0x0100010010804322,
+    0x1202480040003001, 0x0210291014008008, 0x1080081004200200, 0x5300700018403002,
+    0x0000180048040101, 0x0008100ac0808003, 0x00480305001400e2, 0x0000208100024a08,
+    0x8490100901008000, 0x000c208828095009, 0x0004129000540041, 0x8400180100480080,
+    0x0080200200110054, 0x200161800e000104, 0x000000a002000119, 0x900100a0049002c1,
+    0x6214200040044018, 0x5040002020001000, 0x4900180480080580, 0x0401002220040080,
+    0x2400029401004220, 0x010099001a040004, 0x2020008400030610, 0x44009806c0048a20,
+    0x0000102120080020, 0x0802003802010080, 0x00080082106c0400, 0x00d6020011010008,
+    0x1440288002081081, 0x8220400200400100, 0x8000128008410021, 0x3008804600210808,
+    0x0040040280022800, 0x80a1024010400808, 0x0810000400900211, 0x9102822009920004,
+    0x4840010008301811, 0x0003000800820404, 0x08000b0200004ca1, 0x1000423000e00c01,
+    0x0050004021002018, 0x0244080081015024, 0x09d0002000124050, 0x0800020040842009,
+    0x01484c0480020700, 0x0000008040221004, 0x00180402b8910c00, 0x200002290cac0200,
+    0x0400810410402202, 0x020010204000801d, 0x0110040840902081, 0x0210084200852002,
+    0x1088410804106042, 0x2400020428009041, 0x010081020048028c, 0x004000408024110a,
+};
 
-fn tryMagic(magic: u64, mask: Bitboard, sq_idx: u6, comptime is_bishop: bool, table: []Bitboard) bool {
+const bishop_magic_numbers = [64]u64{
+    0x0088200282011402, 0x4080220a22002000, 0x02010044058050c0, 0x8004010222002002,
+    0x00401c2100210021, 0x01044480720a25c4, 0x0022001082090d88, 0x8c60401011002000,
+    0x0022010a30040081, 0x000429006a140852, 0x0101324083020201, 0x00000040882144c0,
+    0x0080102824080000, 0x4080004012400204, 0x0260816008010788, 0x8203c10021002808,
+    0x0888004000958414, 0x0800420200424205, 0x7000840800840088, 0x0000210042104102,
+    0x915080a808604020, 0x20a1000010021010, 0x00090208240200a0, 0x8800050250040100,
+    0x5230402204080ec0, 0x1590002090808108, 0x4cc1298045a06200, 0x0004010100200880,
+    0x0801001001004004, 0x4110008000120080, 0x044800a000054214, 0x0020080820622100,
+    0x4400201a82220021, 0x3188080824818110, 0x0220420040020012, 0x8048208020880201,
+    0x0844008200040104, 0x00b0008b08180303, 0x0129000c08106060, 0x0052008200044948,
+    0x3040228941001020, 0x0884800920000180, 0x2200200828011008, 0xc981200221040080,
+    0x5000010102002108, 0x0002320200080200, 0x42e80a0080101004, 0x00004102a0200006,
+    0x000a002200420000, 0x0050219008200002, 0x1040104808240042, 0x0020000005010040,
+    0x0484088086009000, 0x04050c0020990180, 0x204118a011602010, 0x261001209c088070,
+    0x5810202429011200, 0x00c10c0300c61000, 0xf501130050101000, 0x0840004051209100,
+    0x0520020000814410, 0x2000804008810410, 0x8000288150008048, 0x1004430408014009,
+};
+
+// Build a single square's lookup table using a known-good magic number (single pass, no search)
+fn buildTable(sq_idx: u6, magic: u64, mask: Bitboard, comptime is_bishop: bool) [if (is_bishop) bishop_table_size else rook_table_size]Bitboard {
     const table_size = if (is_bishop) bishop_table_size else rook_table_size;
     const shift = if (is_bishop) bishop_shift else rook_shift;
+    var table = [_]Bitboard{0} ** table_size;
 
-    // Clear table
-    for (0..table_size) |i| table[i] = 0;
-
-    // Use a separate "used" tracker via a flag approach:
-    // We store attacks+1 (since attacks can be 0 for edge cases? no, never 0).
-    // Actually, real attacks are never 0 for rook/bishop. Let's use a separate array.
-    var used = [_]bool{false} ** 4096;
-
+    // Enumerate all subsets of mask (carry-rippler)
     var occ: Bitboard = 0;
     while (true) {
         const attacks_val = if (is_bishop) bishopAttacksSlow(sq_idx, occ) else rookAttacksSlow(sq_idx, occ);
         const index = @as(usize, (occ *% magic) >> shift);
-        if (index >= table_size) return false;
-
-        if (used[index]) {
-            if (table[index] != attacks_val) return false; // Destructive collision
-        } else {
-            used[index] = true;
-            table[index] = attacks_val;
+        if (table[index] != 0 and table[index] != attacks_val) {
+            unreachable; // destructive collision — bad magic number
         }
+        table[index] = attacks_val;
 
         occ = (occ -% mask) & mask;
         if (occ == 0) break;
     }
 
-    return true;
+    return table;
 }
 
-fn findMagic(sq_idx: u6, comptime is_bishop: bool, table: []Bitboard) u64 {
-    const mask = if (is_bishop) bishopMask(sq_idx) else rookMask(sq_idx);
+// Precomputed masks
+const rook_masks: [64]Bitboard = blk: {
+    var table: [64]Bitboard = undefined;
+    for (0..64) |sq| table[sq] = rookMask(@intCast(sq));
+    break :blk table;
+};
 
-    // Use a simple PRNG for magic candidate generation
-    var state: u64 = @as(u64, sq_idx) *% 6364136223846793005 +% 1442695040888963407;
-    if (is_bishop) state +%= 0x12345678;
+const bishop_masks: [64]Bitboard = blk: {
+    var table: [64]Bitboard = undefined;
+    for (0..64) |sq| table[sq] = bishopMask(@intCast(sq));
+    break :blk table;
+};
 
-    var attempts: u32 = 0;
-    while (attempts < 100_000_000) : (attempts += 1) {
-        // Generate sparse random number (AND three randoms together)
-        state ^= state >> 12;
-        state ^= state << 25;
-        state ^= state >> 27;
-        const r1 = state *% 0x2545F4914F6CDD1D;
-        state ^= state >> 12;
-        state ^= state << 25;
-        state ^= state >> 27;
-        const r2 = state *% 0x2545F4914F6CDD1D;
-        state ^= state >> 12;
-        state ^= state << 25;
-        state ^= state >> 27;
-        const r3 = state *% 0x2545F4914F6CDD1D;
-
-        const magic = r1 & r2 & r3;
-
-        // Quick rejection: magic should map mask bits to top bits
-        if (@popCount((mask *% magic) & 0xFF00000000000000) < 6) continue;
-
-        if (tryMagic(magic, mask, sq_idx, is_bishop, table)) {
-            return magic;
-        }
-    }
-
-    unreachable; // Should always find a magic
-}
-
-pub fn init() void {
-    if (initialized) return;
-
+// Precomputed lookup tables (built at comptime using hardcoded magic numbers)
+const rook_table: [64][rook_table_size]Bitboard = blk: {
+    @setEvalBranchQuota(10_000_000);
+    var table: [64][rook_table_size]Bitboard = undefined;
     for (0..64) |sq| {
-        const sq_idx: u6 = @intCast(sq);
-        rook_masks_arr[sq] = rookMask(sq_idx);
-        bishop_masks_arr[sq] = bishopMask(sq_idx);
-
-        rook_magic_arr[sq] = findMagic(sq_idx, false, &rook_table[sq]);
-        bishop_magic_arr[sq] = findMagic(sq_idx, true, &bishop_table[sq]);
+        table[sq] = buildTable(@intCast(sq), rook_magic_numbers[sq], rook_masks[sq], false);
     }
+    break :blk table;
+};
 
-    initialized = true;
-}
+const bishop_table: [64][bishop_table_size]Bitboard = blk: {
+    @setEvalBranchQuota(10_000_000);
+    var table: [64][bishop_table_size]Bitboard = undefined;
+    for (0..64) |sq| {
+        table[sq] = buildTable(@intCast(sq), bishop_magic_numbers[sq], bishop_masks[sq], true);
+    }
+    break :blk table;
+};
 
 pub inline fn getRookAttacks(sq: u6, occupancy: Bitboard) Bitboard {
-    const masked = occupancy & rook_masks_arr[sq];
-    const index = (masked *% rook_magic_arr[sq]) >> rook_shift;
+    const masked = occupancy & rook_masks[sq];
+    const index = (masked *% rook_magic_numbers[sq]) >> rook_shift;
     return rook_table[sq][index];
 }
 
 pub inline fn getBishopAttacks(sq: u6, occupancy: Bitboard) Bitboard {
-    const masked = occupancy & bishop_masks_arr[sq];
-    const index = (masked *% bishop_magic_arr[sq]) >> bishop_shift;
+    const masked = occupancy & bishop_masks[sq];
+    const index = (masked *% bishop_magic_numbers[sq]) >> bishop_shift;
     return bishop_table[sq][index];
 }
 
@@ -260,9 +263,7 @@ test "slow attack functions" {
     try std.testing.expect(e4_bishop_slow & Square.h7.toBitboard() != 0);
 }
 
-test "magic bitboards init and lookup" {
-    init();
-
+test "magic bitboards lookup" {
     // Rook on e4 with no blockers
     const e4_rook = getRookAttacks(@intFromEnum(Square.e4), 0);
     try std.testing.expect(e4_rook & Square.e1.toBitboard() != 0);

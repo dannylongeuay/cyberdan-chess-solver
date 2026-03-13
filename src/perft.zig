@@ -1,7 +1,6 @@
 const std = @import("std");
 const board_mod = @import("board.zig");
 const movegen = @import("movegen.zig");
-const magics = @import("magics.zig");
 const Board = board_mod.Board;
 
 pub fn perft(b: *Board, depth: u32) u64 {

@@ -3,7 +3,6 @@ const types = @import("types.zig");
 const square_mod = @import("square.zig");
 const bb = @import("bitboard.zig");
 const atk = @import("attacks.zig");
-const magics = @import("magics.zig");
 const moves_mod = @import("moves.zig");
 const board_mod = @import("board.zig");
 
@@ -227,16 +226,12 @@ pub fn generateLegalMoves(b: *Board) MoveList {
 }
 
 test "starting position has 20 legal moves" {
-    magics.init();
-
     var board = Board.init();
     const legal = generateLegalMoves(&board);
     try std.testing.expectEqual(@as(usize, 20), legal.count);
 }
 
 test "kiwipete has 48 legal moves" {
-    magics.init();
-
     var board = try Board.fromFen("r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1");
     const legal = generateLegalMoves(&board);
     try std.testing.expectEqual(@as(usize, 48), legal.count);

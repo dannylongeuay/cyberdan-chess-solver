@@ -22,8 +22,6 @@ const Mode = enum { hvh, hvc };
 const Command = enum { play, perft };
 
 pub fn main() !void {
-    magics.init();
-
     var args = std.process.args();
     _ = args.next(); // skip program name
 

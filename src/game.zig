@@ -4,7 +4,6 @@ const bb = @import("bitboard.zig");
 const board_mod = @import("board.zig");
 const movegen = @import("movegen.zig");
 const moves_mod = @import("moves.zig");
-const magics = @import("magics.zig");
 
 const Color = types.Color;
 const PieceType = types.PieceType;
@@ -180,16 +179,12 @@ pub const GameState = struct {
 };
 
 test "checkmate detection" {
-    magics.init();
-
     // Scholar's mate final position: 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6 4.Qxf7#
     var game = try GameState.initFromFen("r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4");
     try std.testing.expectEqual(GameResult.white_wins, game.gameResult());
 }
 
 test "stalemate detection" {
-    magics.init();
-
     // Classic stalemate: K on a8, white Q on b6, white K on c8... let me use a known stalemate
     // white K on g6, white Q on f7, black K on h8 - black has no legal moves, not in check
     var game2 = try GameState.initFromFen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
@@ -197,8 +192,6 @@ test "stalemate detection" {
 }
 
 test "insufficient material" {
-    magics.init();
-
     // K vs K
     var game = try GameState.initFromFen("4k3/8/8/8/8/8/8/4K3 w - - 0 1");
     try std.testing.expect(game.isInsufficientMaterial());

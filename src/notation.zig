@@ -5,7 +5,6 @@ const bb = @import("bitboard.zig");
 const moves_mod = @import("moves.zig");
 const movegen = @import("movegen.zig");
 const board_mod = @import("board.zig");
-const magics = @import("magics.zig");
 
 const Color = types.Color;
 const PieceType = types.PieceType;
@@ -345,8 +344,6 @@ pub fn moveToLongAlgebraic(move: Move, buf: []u8) []const u8 {
 }
 
 test "parse long algebraic" {
-    magics.init();
-
     var board = Board.init();
 
     const m = parseMove("e2e4", &board);
@@ -359,8 +356,6 @@ test "parse long algebraic" {
 }
 
 test "parse SAN" {
-    magics.init();
-
     var board = Board.init();
 
     // e4 (pawn push)
@@ -378,8 +373,6 @@ test "parse SAN" {
 }
 
 test "parse SAN with captures" {
-    magics.init();
-
     // Position after 1.e4 e5 2.Bc4 Nc6 3.Qh5 Nf6
     var board = try Board.fromFen("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4");
     const m = parseMove("Qxf7", &board);
@@ -388,8 +381,6 @@ test "parse SAN with captures" {
 }
 
 test "SAN formatting" {
-    magics.init();
-
     var board = Board.init();
     var buf: [16]u8 = undefined;
 
