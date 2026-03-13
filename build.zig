@@ -35,4 +35,16 @@ pub fn build(b: *std.Build) void {
     const run_tests = b.addRunArtifact(exe_tests);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&run_tests.step);
+
+    const perft_tests = b.addTest(.{
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/perft_deep_test.zig"),
+            .target = target,
+            .optimize = .ReleaseFast,
+        }),
+    });
+
+    const run_perft_tests = b.addRunArtifact(perft_tests);
+    const perft_test_step = b.step("test-perft", "Run deep perft tests (ReleaseFast)");
+    perft_test_step.dependOn(&run_perft_tests.step);
 }
