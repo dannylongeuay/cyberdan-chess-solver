@@ -13,13 +13,14 @@ pub const game_mod = @import("game.zig");
 pub const display = @import("display.zig");
 pub const notation = @import("notation.zig");
 pub const random = @import("random.zig");
+pub const server = @import("server.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
 const GameResult = game_mod.GameResult;
 
 const Mode = enum { hvh, hvc };
-const Command = enum { play, perft };
+const Command = enum { play, perft, serve };
 
 pub fn main() !void {
     var args = std.process.args();
@@ -30,6 +31,7 @@ pub fn main() !void {
     var fen: ?[]const u8 = null;
     var perft_depth: u32 = 0;
     var do_divide = false;
+    var port: u16 = 8080;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "play")) {
@@ -44,6 +46,15 @@ pub fn main() !void {
             } else {
                 std.debug.print("Usage: cyberdan-chess-solver perft <depth>\n", .{});
                 return;
+            }
+        } else if (std.mem.eql(u8, arg, "serve")) {
+            command = .serve;
+        } else if (std.mem.eql(u8, arg, "--port")) {
+            if (args.next()) |port_str| {
+                port = std.fmt.parseInt(u16, port_str, 10) catch {
+                    std.debug.print("Invalid port: {s}\n", .{port_str});
+                    return;
+                };
             }
         } else if (std.mem.eql(u8, arg, "--mode")) {
             if (args.next()) |mode_str| {
@@ -96,6 +107,12 @@ pub fn main() !void {
         },
         .play => {
             try runGame(fen, mode);
+        },
+        .serve => {
+            server.serve(port) catch |err| {
+                std.debug.print("Server error: {}\n", .{err});
+                return;
+            };
         },
     }
 }
@@ -256,6 +273,7 @@ fn printUsage() void {
         \\Commands:
         \\  play              Start a game (default)
         \\  perft <depth>     Run perft test
+        \\  serve             Start HTTP API server
         \\
         \\Options for play:
         \\  --mode hvh        Human vs Human (default)
@@ -265,6 +283,9 @@ fn printUsage() void {
         \\Options for perft:
         \\  --fen <fen>       Test position (default: starting position)
         \\  --divide          Show per-move breakdown
+        \\
+        \\Options for serve:
+        \\  --port <port>     Port to listen on (default: 8080)
         \\
     , .{});
 }
@@ -283,4 +304,5 @@ test {
     _ = display;
     _ = notation;
     _ = random;
+    _ = server;
 }
