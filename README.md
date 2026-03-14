@@ -11,6 +11,7 @@ A bitboard-based chess engine written in Zig. Supports interactive play, full le
 - SAN (Standard Algebraic Notation) and long algebraic move input
 - Game-ending detection: checkmate, stalemate, threefold repetition, fifty-move rule, insufficient material
 - Zobrist hashing with incremental updates for fast position comparison
+- HTTP API server for FEN validation, legal move queries, and move submission with CORS support
 
 ## Getting Started
 
@@ -37,6 +38,8 @@ zig build run                         # build and launch (play mode, default)
 zig build test                        # run all tests
 zig build test-perft                  # run deep perft tests
 zig build run -Doptimize=ReleaseFast  # optimized build
+zig build run -- serve                # start HTTP API server
+zig build run -- serve --port 3000    # start on custom port
 ```
 
 ## Usage
@@ -81,6 +84,108 @@ zig build run -- perft 4 --divide
 # Perft from a custom position
 zig build run -- perft 3 --fen "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq -"
 ```
+
+### Serve
+
+Start the HTTP API server:
+
+```sh
+zig build run -- serve              # listen on 0.0.0.0:8080 (default)
+zig build run -- serve --port 3000  # listen on a custom port
+```
+
+#### Endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/health` | Health check |
+| `POST` | `/validmoves` | Get all legal moves for a position |
+| `POST` | `/submitmove` | Apply a move and return the resulting position |
+| `OPTIONS` | `*` | CORS preflight |
+
+#### GET /health
+
+Returns a simple health check.
+
+**Response:**
+```json
+{"status": "ok"}
+```
+
+#### POST /validmoves
+
+Returns all legal moves for a given FEN position along with game status.
+
+**Request body:**
+```json
+{"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1"}
+```
+
+**Response body:**
+```json
+{
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+  "side_to_move": "black",
+  "status": "ongoing",
+  "move_count": 20,
+  "moves": [
+    {
+      "uci": "b8a6",
+      "san": "Na6",
+      "from": "b8",
+      "to": "a6",
+      "capture": false,
+      "promotion": null,
+      "castling": false,
+      "check": false
+    }
+  ]
+}
+```
+
+The `status` field is one of: `ongoing`, `checkmate`, `stalemate`, `fifty_move_rule`, `insufficient_material`.
+
+The `promotion` field is `null` or one of: `queen`, `rook`, `bishop`, `knight`.
+
+#### POST /submitmove
+
+Apply a move (in UCI or SAN notation) and return the resulting position.
+
+**Request body:**
+```json
+{"fen": "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", "move": "e2e4"}
+```
+
+**Response body:**
+```json
+{
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+  "san": "e4",
+  "status": "ongoing",
+  "side_to_move": "black"
+}
+```
+
+#### Error Responses
+
+All errors return JSON with an `error` code and human-readable `message`:
+
+```json
+{"error": "invalid_fen", "message": "The provided FEN string is invalid"}
+```
+
+| Error Code | HTTP Status | Description |
+|------------|-------------|-------------|
+| `invalid_request` | 400 | Failed to read request body |
+| `invalid_json` | 400 | Request body is not valid JSON |
+| `invalid_fen` | 400 | The FEN string could not be parsed |
+| `invalid_move` | 400 | The move is not legal in the given position |
+| `not_found` | 404 | Unknown endpoint |
+| `method_not_allowed` | 405 | Wrong HTTP method for the endpoint |
+
+#### CORS
+
+All responses include `Access-Control-Allow-Origin: *`. The server handles `OPTIONS` preflight requests with `Access-Control-Allow-Methods: GET, POST, OPTIONS` and `Access-Control-Allow-Headers: Content-Type`.
 
 ## Architecture
 
@@ -148,3 +253,4 @@ xorshift64 PRNG.
 | `display.zig` | Board display for terminal output |
 | `notation.zig` | SAN and long algebraic notation parsing/formatting |
 | `random.zig` | Random move selection (for computer opponent) |
+| `server.zig` | HTTP API server with move validation and game state endpoints |
