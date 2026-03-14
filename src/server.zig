@@ -49,7 +49,9 @@ fn handleConnection(conn: net.Server.Connection) void {
 
     while (true) {
         var request = http_server.receiveHead() catch |err| {
-            std.debug.print("Connection error: {}\n", .{err});
+            if (err != error.HttpConnectionClosing) {
+                std.debug.print("Connection error: {}\n", .{err});
+            }
             return;
         };
         handleRequest(&request) catch |err| {
