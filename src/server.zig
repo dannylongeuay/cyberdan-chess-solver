@@ -23,6 +23,12 @@ const Allocator = std.mem.Allocator;
 const Server = http.Server;
 const JsonBuf = std.ArrayList(u8);
 
+fn getCorsOrigin() []const u8 {
+    const val = std.posix.getenv("CORS_PERMISSIVE") orelse return "https://chess.cyberdan.dev";
+    if (std.mem.eql(u8, val, "1")) return "*";
+    return "https://chess.cyberdan.dev";
+}
+
 pub fn serve(port: u16) !void {
     const address = net.Address.parseIp4("0.0.0.0", port) catch unreachable;
     var server = try address.listen(.{ .reuse_address = true });
@@ -70,7 +76,7 @@ fn handleRequest(request: *Server.Request) !void {
         try request.respond("", .{
             .status = .no_content,
             .extra_headers = &.{
-                .{ .name = "Access-Control-Allow-Origin", .value = "*" },
+                .{ .name = "Access-Control-Allow-Origin", .value = getCorsOrigin() },
                 .{ .name = "Access-Control-Allow-Methods", .value = "GET, POST, OPTIONS" },
                 .{ .name = "Access-Control-Allow-Headers", .value = "Content-Type" },
             },
@@ -234,7 +240,7 @@ fn sendJson(request: *Server.Request, status: http.Status, body: []const u8, opt
         .keep_alive = options.keep_alive,
         .extra_headers = &.{
             .{ .name = "Content-Type", .value = "application/json" },
-            .{ .name = "Access-Control-Allow-Origin", .value = "*" },
+            .{ .name = "Access-Control-Allow-Origin", .value = getCorsOrigin() },
             .{ .name = "Access-Control-Allow-Methods", .value = "GET, POST, OPTIONS" },
             .{ .name = "Access-Control-Allow-Headers", .value = "Content-Type" },
         },
