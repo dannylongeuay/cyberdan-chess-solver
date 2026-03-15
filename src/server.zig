@@ -115,6 +115,12 @@ fn handleRequest(request: *Server.Request, tt: *tt_mod.TranspositionTable) !void
             return;
         }
         try handleBestMove(request, tt);
+    } else if (std.mem.eql(u8, target, "/submitbestmove")) {
+        if (method != .POST) {
+            try sendError(request, .method_not_allowed, "method_not_allowed", "Only POST is allowed", .{});
+            return;
+        }
+        try handleSubmitBestMove(request, tt);
     } else {
         try sendError(request, .not_found, "not_found", "Endpoint not found", .{});
     }
@@ -312,6 +318,100 @@ fn handleBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable) !voi
     } else {
         try json.appendSlice(alloc, ",\"best_move\":null,\"san\":null");
     }
+
+    try json.appendSlice(alloc, ",\"score\":");
+    var score_buf: [16]u8 = undefined;
+    try json.appendSlice(alloc, std.fmt.bufPrint(&score_buf, "{d}", .{result.score}) catch unreachable);
+
+    try json.appendSlice(alloc, ",\"nodes\":");
+    var nodes_buf: [24]u8 = undefined;
+    try json.appendSlice(alloc, std.fmt.bufPrint(&nodes_buf, "{d}", .{result.nodes}) catch unreachable);
+
+    try json.appendSlice(alloc, "}");
+
+    try sendJson(request, .ok, json.items, .{ .keep_alive = true });
+}
+
+fn handleSubmitBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable) !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const alloc = arena.allocator();
+
+    // Read body
+    const body = readBody(request, alloc) catch {
+        try sendError(request, .bad_request, "invalid_request", "Failed to read request body", .{});
+        return;
+    };
+
+    // Parse JSON
+    const BestMoveRequest = struct { fen: []const u8, depth: ?u32 = null, timeout_ms: ?u64 = null };
+    const parsed = std.json.parseFromSliceLeaky(BestMoveRequest, alloc, body, .{}) catch {
+        try sendError(request, .bad_request, "invalid_json", "Failed to parse request body", .{ .keep_alive = true });
+        return;
+    };
+
+    // Parse FEN
+    var board = Board.fromFen(parsed.fen) catch {
+        try sendError(request, .bad_request, "invalid_fen", "The provided FEN string is invalid", .{ .keep_alive = true });
+        return;
+    };
+
+    // Build search options (same logic as handleBestMove)
+    const options: search_mod.SearchOptions = if (parsed.timeout_ms) |t|
+        .{ .max_depth = @min(parsed.depth orelse 100, 100), .timeout_ns = t * std.time.ns_per_ms }
+    else if (parsed.depth) |d|
+        .{ .max_depth = @min(d, 20) }
+    else
+        .{ .timeout_ns = 5000 * std.time.ns_per_ms };
+
+    // Run search
+    const result = search_mod.searchIterative(&board, options, tt);
+
+    const best_move = result.best_move orelse {
+        try sendError(request, .bad_request, "no_moves", "No legal moves available in this position", .{ .keep_alive = true });
+        return;
+    };
+
+    // Get SAN before making the move
+    var san_buf: [16]u8 = undefined;
+    const san = notation.moveToSAN(best_move, &board, &san_buf, null);
+    const san_copy = try alloc.dupe(u8, san);
+
+    // Make the move
+    _ = board.makeMove(best_move);
+
+    // Get new FEN
+    var fen_buf: [100]u8 = undefined;
+    const new_fen = board.toFen(&fen_buf);
+
+    // Generate legal moves in new position and determine game status
+    const after_legal = movegen.generateLegalMoves(&board);
+    const status = computeGameStatus(&board, after_legal.count);
+    const side = if (board.side_to_move == .white) "white" else "black";
+
+    // Build response JSON
+    var json: JsonBuf = .empty;
+    try json.appendSlice(alloc, "{\"fen\":\"");
+    try json.appendSlice(alloc, new_fen);
+    try json.appendSlice(alloc, "\",\"san\":\"");
+    try json.appendSlice(alloc, san_copy);
+    try json.appendSlice(alloc, "\",\"status\":\"");
+    try json.appendSlice(alloc, status);
+    try json.appendSlice(alloc, "\",\"side_to_move\":\"");
+    try json.appendSlice(alloc, side);
+    try json.appendSlice(alloc, "\",\"move_count\":");
+    var count_buf: [16]u8 = undefined;
+    try json.appendSlice(alloc, std.fmt.bufPrint(&count_buf, "{d}", .{after_legal.count}) catch unreachable);
+    try json.appendSlice(alloc, ",\"moves\":[");
+
+    for (after_legal.slice(), 0..) |m, i| {
+        if (i > 0) try json.append(alloc, ',');
+        try appendMoveObject(&json, alloc, m, &board, after_legal);
+    }
+
+    try json.appendSlice(alloc, "],\"depth\":");
+    var depth_buf: [16]u8 = undefined;
+    try json.appendSlice(alloc, std.fmt.bufPrint(&depth_buf, "{d}", .{result.depth}) catch unreachable);
 
     try json.appendSlice(alloc, ",\"score\":");
     var score_buf: [16]u8 = undefined;

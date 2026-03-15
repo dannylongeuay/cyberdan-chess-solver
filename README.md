@@ -11,7 +11,7 @@ A bitboard-based chess engine written in Zig. Supports interactive play, full le
 - SAN (Standard Algebraic Notation) and long algebraic move input
 - Game-ending detection: checkmate, stalemate, threefold repetition, fifty-move rule, insufficient material
 - Zobrist hashing with incremental updates for fast position comparison
-- HTTP API server for FEN validation, legal move queries, and move submission with CORS support
+- HTTP API server for FEN validation, legal move queries, move submission, and best-move search with CORS support
 
 ## Getting Started
 
@@ -101,6 +101,8 @@ zig build run -- serve --port 3000  # listen on a custom port
 | `GET` | `/health` | Health check |
 | `POST` | `/validmoves` | Get all legal moves for a position |
 | `POST` | `/submitmove` | Apply a move and return the resulting position |
+| `POST` | `/bestmove` | Find the best move for a position |
+| `POST` | `/submitbestmove` | Find and play the best move, returning the new position |
 | `OPTIONS` | `*` | CORS preflight |
 
 #### GET /health
@@ -181,6 +183,76 @@ Apply a move (in UCI or SAN notation) and return the resulting position.
 
 The response includes all legal moves for the resulting position, matching the format from `/validmoves`. This eliminates the need for a separate `/validmoves` call after each move.
 
+#### POST /bestmove
+
+Find the best move for a given position using iterative deepening search with alpha-beta pruning.
+
+**Request body:**
+```json
+{"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1", "depth": 10, "timeout_ms": 2000}
+```
+
+Both `depth` and `timeout_ms` are optional. Search behavior depends on which fields are provided:
+
+| Fields provided | Behavior |
+|-----------------|----------|
+| `timeout_ms` | Timed search; `depth` acts as a cap (default 100) |
+| `depth` only | Fixed-depth search, capped at 20 |
+| Neither | Default 5-second timeout |
+
+**Response body:**
+```json
+{
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+  "depth": 10,
+  "best_move": "c7c5",
+  "san": "c5",
+  "score": 15,
+  "nodes": 482370
+}
+```
+
+`best_move` and `san` are `null` when no legal moves exist (checkmate/stalemate).
+
+#### POST /submitbestmove
+
+Find the best move for a position, play it, and return the resulting position with all legal moves.
+
+**Request body:**
+```json
+{"fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1", "depth": 10, "timeout_ms": 2000}
+```
+
+Search options behave the same as [`/bestmove`](#post-bestmove).
+
+**Response body:**
+```json
+{
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/4p3/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
+  "san": "c5",
+  "status": "ongoing",
+  "side_to_move": "white",
+  "move_count": 29,
+  "moves": [
+    {
+      "uci": "b1a3",
+      "san": "Na3",
+      "from": "b1",
+      "to": "a3",
+      "capture": false,
+      "promotion": null,
+      "castling": false,
+      "check": false
+    }
+  ],
+  "depth": 10,
+  "score": -15,
+  "nodes": 482370
+}
+```
+
+The response combines the move result (same structure as `/submitmove`) with search metadata (`depth`, `score`, `nodes`). Returns a `no_moves` error if the position has no legal moves (checkmate/stalemate).
+
 #### Error Responses
 
 All errors return JSON with an `error` code and human-readable `message`:
@@ -195,12 +267,13 @@ All errors return JSON with an `error` code and human-readable `message`:
 | `invalid_json` | 400 | Request body is not valid JSON |
 | `invalid_fen` | 400 | The FEN string could not be parsed |
 | `invalid_move` | 400 | The move is not legal in the given position |
+| `no_moves` | 400 | No legal moves available in this position |
 | `not_found` | 404 | Unknown endpoint |
 | `method_not_allowed` | 405 | Wrong HTTP method for the endpoint |
 
 #### CORS
 
-All responses include `Access-Control-Allow-Origin: *`. The server handles `OPTIONS` preflight requests with `Access-Control-Allow-Methods: GET, POST, OPTIONS` and `Access-Control-Allow-Headers: Content-Type`.
+All responses include CORS headers. The default allowed origin is `https://chess.cyberdan.dev`. Set the `CORS_PERMISSIVE=1` environment variable to allow all origins (`*`). The server handles `OPTIONS` preflight requests with `Access-Control-Allow-Methods: GET, POST, OPTIONS` and `Access-Control-Allow-Headers: Content-Type`.
 
 ## Architecture
 
