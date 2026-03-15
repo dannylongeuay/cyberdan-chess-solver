@@ -338,6 +338,36 @@ pub const Board = struct {
         self.hash = undo.hash;
     }
 
+    pub const NullMoveUndo = struct {
+        en_passant: ?u6,
+        hash: u64,
+    };
+
+    pub fn makeNullMove(self: *Board) NullMoveUndo {
+        const undo = NullMoveUndo{
+            .en_passant = self.en_passant,
+            .hash = self.hash,
+        };
+
+        // Clear en passant from hash
+        if (self.en_passant) |ep| {
+            self.hash ^= Zobrist.instance.en_passant_keys[ep & 7];
+            self.en_passant = null;
+        }
+
+        // Toggle side to move
+        self.side_to_move = self.side_to_move.opponent();
+        self.hash ^= Zobrist.instance.side_key;
+
+        return undo;
+    }
+
+    pub fn unmakeNullMove(self: *Board, undo: NullMoveUndo) void {
+        self.side_to_move = self.side_to_move.opponent();
+        self.en_passant = undo.en_passant;
+        self.hash = undo.hash;
+    }
+
     pub fn getPieceTypeAt(self: *const Board, sq: u6, color_idx: usize) PieceType {
         const bit = @as(u64, 1) << sq;
         inline for (0..6) |p| {
@@ -628,4 +658,23 @@ test "makeMove/unmakeMove restores board" {
     // Verify board is exactly the starting position
     var buf: [100]u8 = undefined;
     try std.testing.expectEqualStrings(Board.starting_fen, board.toFen(&buf));
+}
+
+test "makeNullMove/unmakeNullMove restores board" {
+    var board = Board.init();
+    const original_hash = board.hash;
+    const original_side = board.side_to_move;
+
+    const undo = board.makeNullMove();
+
+    // Side should have toggled
+    try std.testing.expect(board.side_to_move != original_side);
+    // Hash should have changed
+    try std.testing.expect(board.hash != original_hash);
+
+    board.unmakeNullMove(undo);
+
+    // Everything restored
+    try std.testing.expectEqual(original_hash, board.hash);
+    try std.testing.expectEqual(original_side, board.side_to_move);
 }

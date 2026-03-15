@@ -16,6 +16,7 @@ pub const random = @import("random.zig");
 pub const server = @import("server.zig");
 pub const eval_mod = @import("eval.zig");
 pub const search_mod = @import("search.zig");
+pub const tt_mod = @import("tt.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
@@ -34,6 +35,7 @@ pub fn main() !void {
     var perft_depth: u32 = 0;
     var do_divide = false;
     var port: u16 = 8080;
+    var timeout_ms: u64 = 5000;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "play")) {
@@ -71,6 +73,13 @@ pub fn main() !void {
             }
         } else if (std.mem.eql(u8, arg, "--fen")) {
             fen = args.next();
+        } else if (std.mem.eql(u8, arg, "--timeout")) {
+            if (args.next()) |timeout_str| {
+                timeout_ms = std.fmt.parseInt(u64, timeout_str, 10) catch {
+                    std.debug.print("Invalid timeout: {s}\n", .{timeout_str});
+                    return;
+                };
+            }
         } else if (std.mem.eql(u8, arg, "--divide")) {
             do_divide = true;
         } else if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
@@ -108,7 +117,12 @@ pub fn main() !void {
             }
         },
         .play => {
-            try runGame(fen, mode);
+            var tt = tt_mod.TranspositionTable.init(std.heap.page_allocator, 64) catch {
+                std.debug.print("Failed to allocate transposition table\n", .{});
+                return;
+            };
+            defer tt.deinit();
+            try runGame(fen, mode, timeout_ms, &tt);
         },
         .serve => {
             server.serve(port) catch |err| {
@@ -119,7 +133,7 @@ pub fn main() !void {
     }
 }
 
-fn runGame(fen: ?[]const u8, mode: Mode) !void {
+fn runGame(fen: ?[]const u8, mode: Mode, timeout_ms: u64, tt: *tt_mod.TranspositionTable) !void {
     var game = if (fen) |f|
         GameState.initFromFen(f) catch {
             std.debug.print("Invalid FEN: {s}\n", .{f});
@@ -160,7 +174,7 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
 
         if (is_computer_turn) {
             // Computer's turn
-            const search_result = search_mod.searchIterative(&game.board, 5);
+            const search_result = search_mod.searchIterative(&game.board, .{ .timeout_ns = timeout_ms * std.time.ns_per_ms }, tt);
             const move = search_result.best_move orelse {
                 try stdout.print("No legal moves!\n", .{});
                 try stdout.flush();
@@ -280,6 +294,7 @@ fn printUsage() void {
         \\  --mode hvh        Human vs Human (default)
         \\  --mode hvc        Human vs Computer
         \\  --fen <fen>       Start from FEN position
+        \\  --timeout <ms>    Search timeout in milliseconds (default: 5000)
         \\
         \\Options for perft:
         \\  --fen <fen>       Test position (default: starting position)
@@ -308,4 +323,5 @@ test {
     _ = server;
     _ = eval_mod;
     _ = search_mod;
+    _ = tt_mod;
 }

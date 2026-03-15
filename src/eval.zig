@@ -8,7 +8,7 @@ const PieceType = types.PieceType;
 const Bitboard = bb.Bitboard;
 const Board = board_mod.Board;
 
-pub const CHECKMATE_SCORE: i32 = 100_000;
+pub const CHECKMATE_SCORE: i32 = 30_000;
 pub const DRAW_SCORE: i32 = 0;
 
 // Material values indexed by PieceType ordinal (pawn=0..king=5)

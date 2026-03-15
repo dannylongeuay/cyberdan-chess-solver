@@ -11,6 +11,7 @@ const square_mod = @import("square.zig");
 const types = @import("types.zig");
 const bb = @import("bitboard.zig");
 const search_mod = @import("search.zig");
+const tt_mod = @import("tt.zig");
 
 const Board = board_mod.Board;
 const Move = moves_mod.Move;
@@ -35,16 +36,21 @@ pub fn serve(port: u16) !void {
     var server = try address.listen(.{ .reuse_address = true });
     defer server.deinit();
 
+    // Allocate TT once, shared across all requests (thread-safe by design —
+    // worst case is a stale entry that fails the key check on probe).
+    var tt = try tt_mod.TranspositionTable.init(std.heap.page_allocator, 16);
+    defer tt.deinit();
+
     std.debug.print("Chess server listening on http://0.0.0.0:{d}\n", .{port});
 
     while (true) {
         const conn = try server.accept();
-        const thread = try std.Thread.spawn(.{}, handleConnection, .{conn});
+        const thread = try std.Thread.spawn(.{}, handleConnection, .{ conn, &tt });
         thread.detach();
     }
 }
 
-fn handleConnection(conn: net.Server.Connection) void {
+fn handleConnection(conn: net.Server.Connection, tt: *tt_mod.TranspositionTable) void {
     defer conn.stream.close();
 
     var reader_buf: [8192]u8 = undefined;
@@ -61,7 +67,7 @@ fn handleConnection(conn: net.Server.Connection) void {
             }
             return;
         };
-        handleRequest(&request) catch |err| {
+        handleRequest(&request, tt) catch |err| {
             std.debug.print("Request handler error: {}\n", .{err});
             return;
         };
@@ -69,7 +75,7 @@ fn handleConnection(conn: net.Server.Connection) void {
     }
 }
 
-fn handleRequest(request: *Server.Request) !void {
+fn handleRequest(request: *Server.Request, tt: *tt_mod.TranspositionTable) !void {
     const method = request.head.method;
     const target = request.head.target;
 
@@ -108,7 +114,7 @@ fn handleRequest(request: *Server.Request) !void {
             try sendError(request, .method_not_allowed, "method_not_allowed", "Only POST is allowed", .{});
             return;
         }
-        try handleBestMove(request);
+        try handleBestMove(request, tt);
     } else {
         try sendError(request, .not_found, "not_found", "Endpoint not found", .{});
     }
@@ -246,7 +252,7 @@ fn handleSubmitMove(request: *Server.Request) !void {
     try sendJson(request, .ok, json.items, .{ .keep_alive = true });
 }
 
-fn handleBestMove(request: *Server.Request) !void {
+fn handleBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable) !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
@@ -258,13 +264,22 @@ fn handleBestMove(request: *Server.Request) !void {
     };
 
     // Parse JSON
-    const BestMoveRequest = struct { fen: []const u8, depth: ?u32 = null };
+    const BestMoveRequest = struct { fen: []const u8, depth: ?u32 = null, timeout_ms: ?u64 = null };
     const parsed = std.json.parseFromSliceLeaky(BestMoveRequest, alloc, body, .{}) catch {
         try sendError(request, .bad_request, "invalid_json", "Failed to parse request body", .{ .keep_alive = true });
         return;
     };
 
-    const depth = @min(parsed.depth orelse 4, 20);
+    // Build search options:
+    //   timeout_ms provided → use it (with max_depth from depth or 100)
+    //   depth provided (no timeout) → depth-only, backward compatible
+    //   neither → default 5s timeout, max_depth 100
+    const options: search_mod.SearchOptions = if (parsed.timeout_ms) |t|
+        .{ .max_depth = @min(parsed.depth orelse 100, 100), .timeout_ns = t * std.time.ns_per_ms }
+    else if (parsed.depth) |d|
+        .{ .max_depth = @min(d, 20) }
+    else
+        .{ .timeout_ns = 5000 * std.time.ns_per_ms };
 
     // Parse FEN
     var board = Board.fromFen(parsed.fen) catch {
@@ -272,8 +287,8 @@ fn handleBestMove(request: *Server.Request) !void {
         return;
     };
 
-    // Run search
-    const result = search_mod.searchIterative(&board, depth);
+    // Run search (uses shared TT allocated once at server startup)
+    const result = search_mod.searchIterative(&board, options, tt);
 
     // Build response
     var json: JsonBuf = .empty;
