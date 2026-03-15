@@ -161,8 +161,11 @@ Apply a move (in UCI or SAN notation) and return the resulting position.
 **Response body:**
 ```json
 {
-  "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
+  "uci": "e2e4",
   "san": "e4",
+  "from": "e2",
+  "to": "e4",
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
   "status": "ongoing",
   "side_to_move": "black",
   "move_count": 20,
@@ -205,14 +208,16 @@ Both `depth` and `timeout_ms` are optional. Search behavior depends on which fie
 {
   "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
   "depth": 10,
-  "best_move": "c7c5",
+  "uci": "c7c5",
   "san": "c5",
+  "from": "c7",
+  "to": "c5",
   "score": 15,
   "nodes": 482370
 }
 ```
 
-`best_move` and `san` are `null` when no legal moves exist (checkmate/stalemate).
+`uci`, `san`, `from`, and `to` are `null` when no legal moves exist (checkmate/stalemate).
 
 #### POST /submitbestmove
 
@@ -228,8 +233,11 @@ Search options behave the same as [`/bestmove`](#post-bestmove).
 **Response body:**
 ```json
 {
-  "fen": "rnbqkbnr/pppppppp/8/8/4P3/4p3/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
+  "uci": "c7c5",
   "san": "c5",
+  "from": "c7",
+  "to": "c5",
+  "fen": "rnbqkbnr/pppppppp/8/8/4P3/4p3/PPPP1PPP/RNBQKBNR w KQkq c6 0 2",
   "status": "ongoing",
   "side_to_move": "white",
   "move_count": 29,

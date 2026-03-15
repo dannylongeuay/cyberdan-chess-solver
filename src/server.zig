@@ -215,10 +215,10 @@ fn handleSubmitMove(request: *Server.Request) !void {
         return;
     };
 
-    // Get SAN before making the move
-    var san_buf: [16]u8 = undefined;
-    const san = notation.moveToSAN(move, &board, &san_buf, null);
-    const san_copy = try alloc.dupe(u8, san);
+    // Build move fields before making the move (SAN needs pre-move board)
+    var json: JsonBuf = .empty;
+    try json.appendSlice(alloc, "{");
+    try appendMoveFields(&json, alloc, move, &board);
 
     // Make the move
     _ = board.makeMove(move);
@@ -232,12 +232,9 @@ fn handleSubmitMove(request: *Server.Request) !void {
     const status = computeGameStatus(&board, after_legal.count);
     const side = if (board.side_to_move == .white) "white" else "black";
 
-    // Build response JSON
-    var json: JsonBuf = .empty;
-    try json.appendSlice(alloc, "{\"fen\":\"");
+    // Continue response JSON
+    try json.appendSlice(alloc, ",\"fen\":\"");
     try json.appendSlice(alloc, new_fen);
-    try json.appendSlice(alloc, "\",\"san\":\"");
-    try json.appendSlice(alloc, san_copy);
     try json.appendSlice(alloc, "\",\"status\":\"");
     try json.appendSlice(alloc, status);
     try json.appendSlice(alloc, "\",\"side_to_move\":\"");
@@ -305,18 +302,10 @@ fn handleBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable) !voi
     try json.appendSlice(alloc, std.fmt.bufPrint(&depth_buf, "{d}", .{result.depth}) catch unreachable);
 
     if (result.best_move) |move| {
-        var uci_buf: [6]u8 = undefined;
-        const uci = notation.moveToLongAlgebraic(move, &uci_buf);
-        var san_buf: [16]u8 = undefined;
-        const san = notation.moveToSAN(move, &board, &san_buf, null);
-
-        try json.appendSlice(alloc, ",\"best_move\":\"");
-        try json.appendSlice(alloc, uci);
-        try json.appendSlice(alloc, "\",\"san\":\"");
-        try json.appendSlice(alloc, san);
-        try json.appendSlice(alloc, "\"");
+        try json.append(alloc, ',');
+        try appendMoveFields(&json, alloc, move, &board);
     } else {
-        try json.appendSlice(alloc, ",\"best_move\":null,\"san\":null");
+        try json.appendSlice(alloc, ",\"uci\":null,\"san\":null,\"from\":null,\"to\":null");
     }
 
     try json.appendSlice(alloc, ",\"score\":");
@@ -372,10 +361,10 @@ fn handleSubmitBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable
         return;
     };
 
-    // Get SAN before making the move
-    var san_buf: [16]u8 = undefined;
-    const san = notation.moveToSAN(best_move, &board, &san_buf, null);
-    const san_copy = try alloc.dupe(u8, san);
+    // Build move fields before making the move (SAN needs pre-move board)
+    var json: JsonBuf = .empty;
+    try json.appendSlice(alloc, "{");
+    try appendMoveFields(&json, alloc, best_move, &board);
 
     // Make the move
     _ = board.makeMove(best_move);
@@ -389,12 +378,9 @@ fn handleSubmitBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable
     const status = computeGameStatus(&board, after_legal.count);
     const side = if (board.side_to_move == .white) "white" else "black";
 
-    // Build response JSON
-    var json: JsonBuf = .empty;
-    try json.appendSlice(alloc, "{\"fen\":\"");
+    // Continue response JSON
+    try json.appendSlice(alloc, ",\"fen\":\"");
     try json.appendSlice(alloc, new_fen);
-    try json.appendSlice(alloc, "\",\"san\":\"");
-    try json.appendSlice(alloc, san_copy);
     try json.appendSlice(alloc, "\",\"status\":\"");
     try json.appendSlice(alloc, status);
     try json.appendSlice(alloc, "\",\"side_to_move\":\"");
@@ -514,6 +500,27 @@ fn appendJsonEscaped(json: *JsonBuf, alloc: Allocator, s: []const u8) !void {
             },
         }
     }
+}
+
+fn appendMoveFields(json: *JsonBuf, alloc: Allocator, move: Move, board: *Board) !void {
+    var uci_buf: [6]u8 = undefined;
+    const uci = notation.moveToLongAlgebraic(move, &uci_buf);
+    var san_buf: [16]u8 = undefined;
+    const san = notation.moveToSAN(move, board, &san_buf, null);
+    const from_sq: Square = @enumFromInt(move.from);
+    const to_sq: Square = @enumFromInt(move.to);
+    const from_str = from_sq.toString();
+    const to_str = to_sq.toString();
+
+    try json.appendSlice(alloc, "\"uci\":\"");
+    try json.appendSlice(alloc, uci);
+    try json.appendSlice(alloc, "\",\"san\":\"");
+    try json.appendSlice(alloc, san);
+    try json.appendSlice(alloc, "\",\"from\":\"");
+    try json.appendSlice(alloc, &from_str);
+    try json.appendSlice(alloc, "\",\"to\":\"");
+    try json.appendSlice(alloc, &to_str);
+    try json.appendSlice(alloc, "\"");
 }
 
 fn appendMoveObject(json: *JsonBuf, alloc: Allocator, move: Move, board: *Board, legal: MoveList) !void {
