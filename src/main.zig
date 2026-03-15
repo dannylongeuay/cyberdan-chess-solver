@@ -14,6 +14,8 @@ pub const display = @import("display.zig");
 pub const notation = @import("notation.zig");
 pub const random = @import("random.zig");
 pub const server = @import("server.zig");
+pub const eval_mod = @import("eval.zig");
+pub const search_mod = @import("search.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
@@ -126,8 +128,6 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
     else
         GameState.init();
 
-    var prng = std.Random.DefaultPrng.init(@truncate(@as(u128, @bitCast(std.time.nanoTimestamp()))));
-
     var stdout_buf: [8192]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buf);
     const stdout = &stdout_writer.interface;
@@ -160,7 +160,8 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
 
         if (is_computer_turn) {
             // Computer's turn
-            const move = random.randomMove(&game.board, &prng) orelse {
+            const search_result = search_mod.searchIterative(&game.board, 5);
+            const move = search_result.best_move orelse {
                 try stdout.print("No legal moves!\n", .{});
                 try stdout.flush();
                 return;
@@ -169,7 +170,7 @@ fn runGame(fen: ?[]const u8, mode: Mode) !void {
             var san_buf: [16]u8 = undefined;
             const san = notation.moveToSAN(move, &game.board, &san_buf, null);
             game.makeMove(move);
-            try stdout.print("Computer plays: {s}\n\n", .{san});
+            try stdout.print("Computer plays: {s} (score: {d})\n\n", .{ san, search_result.score });
             try stdout.flush();
         } else {
             // Human's turn
@@ -305,4 +306,6 @@ test {
     _ = notation;
     _ = random;
     _ = server;
+    _ = eval_mod;
+    _ = search_mod;
 }
