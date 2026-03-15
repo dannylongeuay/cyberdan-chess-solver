@@ -1,0 +1,10 @@
+.git
+.gitignore
+.zig-cache
+zig-out
+.direnv
+.envrc
+flake.nix
+flake.lock
+LICENSE
+README.md
