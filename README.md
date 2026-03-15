@@ -162,9 +162,24 @@ Apply a move (in UCI or SAN notation) and return the resulting position.
   "fen": "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1",
   "san": "e4",
   "status": "ongoing",
-  "side_to_move": "black"
+  "side_to_move": "black",
+  "move_count": 20,
+  "moves": [
+    {
+      "uci": "b8a6",
+      "san": "Na6",
+      "from": "b8",
+      "to": "a6",
+      "capture": false,
+      "promotion": null,
+      "castling": false,
+      "check": false
+    }
+  ]
 }
 ```
+
+The response includes all legal moves for the resulting position, matching the format from `/validmoves`. This eliminates the need for a separate `/validmoves` call after each move.
 
 #### Error Responses
 

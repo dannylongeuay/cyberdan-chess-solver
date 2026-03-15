@@ -223,7 +223,18 @@ fn handleSubmitMove(request: *Server.Request) !void {
     try json.appendSlice(alloc, status);
     try json.appendSlice(alloc, "\",\"side_to_move\":\"");
     try json.appendSlice(alloc, side);
-    try json.appendSlice(alloc, "\"}");
+    try json.appendSlice(alloc, "\",\"move_count\":");
+    var count_buf: [16]u8 = undefined;
+    const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{after_legal.count}) catch unreachable;
+    try json.appendSlice(alloc, count_str);
+    try json.appendSlice(alloc, ",\"moves\":[");
+
+    for (after_legal.slice(), 0..) |m, i| {
+        if (i > 0) try json.append(alloc, ',');
+        try appendMoveObject(&json, alloc, m, &board, after_legal);
+    }
+
+    try json.appendSlice(alloc, "]}");
 
     try sendJson(request, .ok, json.items, .{ .keep_alive = true });
 }
