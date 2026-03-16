@@ -213,11 +213,14 @@ Both `depth` and `timeout_ms` are optional. Search behavior depends on which fie
   "from": "c7",
   "to": "c5",
   "score": 15,
-  "nodes": 482370
+  "nodes": 482370,
+  "source": "search"
 }
 ```
 
 `uci`, `san`, `from`, and `to` are `null` when no legal moves exist (checkmate/stalemate).
+
+The `source` field is `"book"` when the move came from the opening book (with `depth`, `score`, and `nodes` all `0`), or `"search"` when it came from the search algorithm.
 
 #### POST /submitbestmove
 
@@ -255,11 +258,12 @@ Search options behave the same as [`/bestmove`](#post-bestmove).
   ],
   "depth": 10,
   "score": -15,
-  "nodes": 482370
+  "nodes": 482370,
+  "source": "search"
 }
 ```
 
-The response combines the move result (same structure as `/submitmove`) with search metadata (`depth`, `score`, `nodes`). Returns a `no_moves` error if the position has no legal moves (checkmate/stalemate).
+The response combines the move result (same structure as `/submitmove`) with search metadata (`depth`, `score`, `nodes`, `source`). Returns a `no_moves` error if the position has no legal moves (checkmate/stalemate). See [`/bestmove`](#post-bestmove) for details on the `source` field.
 
 #### Error Responses
 

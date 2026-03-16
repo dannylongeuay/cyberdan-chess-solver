@@ -12,6 +12,7 @@ const types = @import("types.zig");
 const bb = @import("bitboard.zig");
 const search_mod = @import("search.zig");
 const tt_mod = @import("tt.zig");
+const book = @import("book.zig");
 
 const Board = board_mod.Board;
 const Move = moves_mod.Move;
@@ -48,6 +49,18 @@ pub fn serve(port: u16) !void {
         const thread = try std.Thread.spawn(.{}, handleConnection, .{ conn, &tt });
         thread.detach();
     }
+}
+
+fn probeBookMove(board: *Board) ?Move {
+    const hit = book.probe(board.hash) orelse return null;
+    const candidate = hit.pickRandom();
+    const legal = movegen.generateLegalMoves(board);
+    for (legal.slice()) |m| {
+        if (m.from == candidate.from and m.to == candidate.to and m.flags == candidate.flags) {
+            return candidate;
+        }
+    }
+    return null;
 }
 
 fn handleConnection(conn: net.Server.Connection, tt: *tt_mod.TranspositionTable) void {
@@ -223,34 +236,10 @@ fn handleSubmitMove(request: *Server.Request) !void {
     // Make the move
     _ = board.makeMove(move);
 
-    // Get new FEN
-    var fen_buf: [100]u8 = undefined;
-    const new_fen = board.toFen(&fen_buf);
+    // Append post-move state (FEN, status, legal moves)
+    try appendPostMoveFields(&json, alloc, &board);
 
-    // Determine game status
-    const after_legal = movegen.generateLegalMoves(&board);
-    const status = computeGameStatus(&board, after_legal.count);
-    const side = if (board.side_to_move == .white) "white" else "black";
-
-    // Continue response JSON
-    try json.appendSlice(alloc, ",\"fen\":\"");
-    try json.appendSlice(alloc, new_fen);
-    try json.appendSlice(alloc, "\",\"status\":\"");
-    try json.appendSlice(alloc, status);
-    try json.appendSlice(alloc, "\",\"side_to_move\":\"");
-    try json.appendSlice(alloc, side);
-    try json.appendSlice(alloc, "\",\"move_count\":");
-    var count_buf: [16]u8 = undefined;
-    const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{after_legal.count}) catch unreachable;
-    try json.appendSlice(alloc, count_str);
-    try json.appendSlice(alloc, ",\"moves\":[");
-
-    for (after_legal.slice(), 0..) |m, i| {
-        if (i > 0) try json.append(alloc, ',');
-        try appendMoveObject(&json, alloc, m, &board, after_legal);
-    }
-
-    try json.appendSlice(alloc, "]}");
+    try json.appendSlice(alloc, "}");
 
     try sendJson(request, .ok, json.items, .{ .keep_alive = true });
 }
@@ -290,6 +279,18 @@ fn handleBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable) !voi
         return;
     };
 
+    // Check opening book first
+    if (probeBookMove(&board)) |candidate| {
+        var json: JsonBuf = .empty;
+        try json.appendSlice(alloc, "{\"fen\":\"");
+        try appendJsonEscaped(&json, alloc, parsed.fen);
+        try json.appendSlice(alloc, "\",\"depth\":0,");
+        try appendMoveFields(&json, alloc, candidate, &board);
+        try json.appendSlice(alloc, ",\"score\":0,\"nodes\":0,\"source\":\"book\"}");
+        try sendJson(request, .ok, json.items, .{ .keep_alive = true });
+        return;
+    }
+
     // Run search (uses shared TT allocated once at server startup)
     const result = search_mod.searchIterative(&board, options, tt);
 
@@ -316,7 +317,7 @@ fn handleBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable) !voi
     var nodes_buf: [24]u8 = undefined;
     try json.appendSlice(alloc, std.fmt.bufPrint(&nodes_buf, "{d}", .{result.nodes}) catch unreachable);
 
-    try json.appendSlice(alloc, "}");
+    try json.appendSlice(alloc, ",\"source\":\"search\"}");
 
     try sendJson(request, .ok, json.items, .{ .keep_alive = true });
 }
@@ -345,6 +346,18 @@ fn handleSubmitBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable
         return;
     };
 
+    // Check opening book first
+    if (probeBookMove(&board)) |candidate| {
+        var json: JsonBuf = .empty;
+        try json.appendSlice(alloc, "{");
+        try appendMoveFields(&json, alloc, candidate, &board);
+        _ = board.makeMove(candidate);
+        try appendPostMoveFields(&json, alloc, &board);
+        try json.appendSlice(alloc, ",\"depth\":0,\"score\":0,\"nodes\":0,\"source\":\"book\"}");
+        try sendJson(request, .ok, json.items, .{ .keep_alive = true });
+        return;
+    }
+
     // Build search options (same logic as handleBestMove)
     const options: search_mod.SearchOptions = if (parsed.timeout_ms) |t|
         .{ .max_depth = @min(parsed.depth orelse 100, 100), .timeout_ns = t * std.time.ns_per_ms }
@@ -369,33 +382,10 @@ fn handleSubmitBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable
     // Make the move
     _ = board.makeMove(best_move);
 
-    // Get new FEN
-    var fen_buf: [100]u8 = undefined;
-    const new_fen = board.toFen(&fen_buf);
+    // Append post-move state (FEN, status, legal moves)
+    try appendPostMoveFields(&json, alloc, &board);
 
-    // Generate legal moves in new position and determine game status
-    const after_legal = movegen.generateLegalMoves(&board);
-    const status = computeGameStatus(&board, after_legal.count);
-    const side = if (board.side_to_move == .white) "white" else "black";
-
-    // Continue response JSON
-    try json.appendSlice(alloc, ",\"fen\":\"");
-    try json.appendSlice(alloc, new_fen);
-    try json.appendSlice(alloc, "\",\"status\":\"");
-    try json.appendSlice(alloc, status);
-    try json.appendSlice(alloc, "\",\"side_to_move\":\"");
-    try json.appendSlice(alloc, side);
-    try json.appendSlice(alloc, "\",\"move_count\":");
-    var count_buf: [16]u8 = undefined;
-    try json.appendSlice(alloc, std.fmt.bufPrint(&count_buf, "{d}", .{after_legal.count}) catch unreachable);
-    try json.appendSlice(alloc, ",\"moves\":[");
-
-    for (after_legal.slice(), 0..) |m, i| {
-        if (i > 0) try json.append(alloc, ',');
-        try appendMoveObject(&json, alloc, m, &board, after_legal);
-    }
-
-    try json.appendSlice(alloc, "],\"depth\":");
+    try json.appendSlice(alloc, ",\"depth\":");
     var depth_buf: [16]u8 = undefined;
     try json.appendSlice(alloc, std.fmt.bufPrint(&depth_buf, "{d}", .{result.depth}) catch unreachable);
 
@@ -407,7 +397,7 @@ fn handleSubmitBestMove(request: *Server.Request, tt: *tt_mod.TranspositionTable
     var nodes_buf: [24]u8 = undefined;
     try json.appendSlice(alloc, std.fmt.bufPrint(&nodes_buf, "{d}", .{result.nodes}) catch unreachable);
 
-    try json.appendSlice(alloc, "}");
+    try json.appendSlice(alloc, ",\"source\":\"search\"}");
 
     try sendJson(request, .ok, json.items, .{ .keep_alive = true });
 }
@@ -481,6 +471,32 @@ fn isInsufficientMaterial(board: *const Board) bool {
     }
 
     return false;
+}
+
+fn appendPostMoveFields(json: *JsonBuf, alloc: Allocator, board_ptr: *Board) !void {
+    var fen_buf: [100]u8 = undefined;
+    const new_fen = board_ptr.toFen(&fen_buf);
+    const after_legal = movegen.generateLegalMoves(board_ptr);
+    const status = computeGameStatus(board_ptr, after_legal.count);
+    const side = if (board_ptr.side_to_move == .white) "white" else "black";
+
+    try json.appendSlice(alloc, ",\"fen\":\"");
+    try json.appendSlice(alloc, new_fen);
+    try json.appendSlice(alloc, "\",\"status\":\"");
+    try json.appendSlice(alloc, status);
+    try json.appendSlice(alloc, "\",\"side_to_move\":\"");
+    try json.appendSlice(alloc, side);
+    try json.appendSlice(alloc, "\",\"move_count\":");
+    var count_buf: [16]u8 = undefined;
+    try json.appendSlice(alloc, std.fmt.bufPrint(&count_buf, "{d}", .{after_legal.count}) catch unreachable);
+    try json.appendSlice(alloc, ",\"moves\":[");
+
+    for (after_legal.slice(), 0..) |m, i| {
+        if (i > 0) try json.append(alloc, ',');
+        try appendMoveObject(json, alloc, m, board_ptr, after_legal);
+    }
+
+    try json.appendSlice(alloc, "]");
 }
 
 fn appendJsonEscaped(json: *JsonBuf, alloc: Allocator, s: []const u8) !void {

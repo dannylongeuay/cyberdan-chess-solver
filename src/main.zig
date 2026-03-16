@@ -17,6 +17,7 @@ pub const server = @import("server.zig");
 pub const eval_mod = @import("eval.zig");
 pub const search_mod = @import("search.zig");
 pub const tt_mod = @import("tt.zig");
+pub const book = @import("book.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
@@ -173,19 +174,36 @@ fn runGame(fen: ?[]const u8, mode: Mode, timeout_ms: u64, tt: *tt_mod.Transposit
         const is_computer_turn = mode == .hvc and game.board.side_to_move == .black;
 
         if (is_computer_turn) {
-            // Computer's turn
-            const search_result = search_mod.searchIterative(&game.board, .{ .timeout_ns = timeout_ms * std.time.ns_per_ms }, tt);
-            const move = search_result.best_move orelse {
-                try stdout.print("No legal moves!\n", .{});
-                try stdout.flush();
-                return;
-            };
+            // Computer's turn — check book first
+            const book_move = if (book.probe(game.board.hash)) |hit| blk: {
+                const candidate = hit.pickRandom();
+                const legal = movegen.generateLegalMoves(&game.board);
+                for (legal.slice()) |m| {
+                    if (m.from == candidate.from and m.to == candidate.to and m.flags == candidate.flags) break :blk candidate;
+                }
+                break :blk null;
+            } else null;
 
-            var san_buf: [16]u8 = undefined;
-            const san = notation.moveToSAN(move, &game.board, &san_buf, null);
-            game.makeMove(move);
-            try stdout.print("Computer plays: {s} (score: {d})\n\n", .{ san, search_result.score });
-            try stdout.flush();
+            if (book_move) |move| {
+                var san_buf: [16]u8 = undefined;
+                const san = notation.moveToSAN(move, &game.board, &san_buf, null);
+                game.makeMove(move);
+                try stdout.print("Computer plays: {s} (book)\n\n", .{san});
+                try stdout.flush();
+            } else {
+                const search_result = search_mod.searchIterative(&game.board, .{ .timeout_ns = timeout_ms * std.time.ns_per_ms }, tt);
+                const move = search_result.best_move orelse {
+                    try stdout.print("No legal moves!\n", .{});
+                    try stdout.flush();
+                    return;
+                };
+
+                var san_buf: [16]u8 = undefined;
+                const san = notation.moveToSAN(move, &game.board, &san_buf, null);
+                game.makeMove(move);
+                try stdout.print("Computer plays: {s} (score: {d})\n\n", .{ san, search_result.score });
+                try stdout.flush();
+            }
         } else {
             // Human's turn
             const side_str = if (game.board.side_to_move == .white) "White" else "Black";
@@ -324,4 +342,5 @@ test {
     _ = eval_mod;
     _ = search_mod;
     _ = tt_mod;
+    _ = book;
 }
