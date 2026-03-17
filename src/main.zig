@@ -18,13 +18,14 @@ pub const eval_mod = @import("eval.zig");
 pub const search_mod = @import("search.zig");
 pub const tt_mod = @import("tt.zig");
 pub const book = @import("book.zig");
+pub const opening_parser = @import("opening_parser.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
 const GameResult = game_mod.GameResult;
 
 const Mode = enum { hvh, hvc };
-const Command = enum { play, perft, serve };
+const Command = enum { play, perft, serve, parse_openings };
 
 pub fn main() !void {
     var args = std.process.args();
@@ -37,6 +38,8 @@ pub fn main() !void {
     var do_divide = false;
     var port: u16 = 8080;
     var timeout_ms: u64 = 5000;
+    var openings_path: ?[]const u8 = null;
+    var openings_color: ?types.Color = null;
 
     while (args.next()) |arg| {
         if (std.mem.eql(u8, arg, "play")) {
@@ -54,6 +57,26 @@ pub fn main() !void {
             }
         } else if (std.mem.eql(u8, arg, "serve")) {
             command = .serve;
+        } else if (std.mem.eql(u8, arg, "parse-openings")) {
+            command = .parse_openings;
+            openings_path = args.next();
+            if (openings_path == null) {
+                std.debug.print("Usage: cyberdan-chess-solver parse-openings <path> <white|black>\n", .{});
+                return;
+            }
+            if (args.next()) |color_str| {
+                if (std.mem.eql(u8, color_str, "white")) {
+                    openings_color = .white;
+                } else if (std.mem.eql(u8, color_str, "black")) {
+                    openings_color = .black;
+                } else {
+                    std.debug.print("Invalid color: {s}. Use 'white' or 'black'\n", .{color_str});
+                    return;
+                }
+            } else {
+                std.debug.print("Usage: cyberdan-chess-solver parse-openings <path> <white|black>\n", .{});
+                return;
+            }
         } else if (std.mem.eql(u8, arg, "--port")) {
             if (args.next()) |port_str| {
                 port = std.fmt.parseInt(u16, port_str, 10) catch {
@@ -128,6 +151,14 @@ pub fn main() !void {
         .serve => {
             server.serve(port) catch |err| {
                 std.debug.print("Server error: {}\n", .{err});
+                return;
+            };
+        },
+        .parse_openings => {
+            var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+            defer arena.deinit();
+            opening_parser.parseOpenings(arena.allocator(), openings_path.?, openings_color.?) catch |err| {
+                std.debug.print("Parse openings error: {}\n", .{err});
                 return;
             };
         },
@@ -304,9 +335,10 @@ fn printUsage() void {
         \\Usage: cyberdan-chess-solver [command] [options]
         \\
         \\Commands:
-        \\  play              Start a game (default)
-        \\  perft <depth>     Run perft test
-        \\  serve             Start HTTP API server
+        \\  play                              Start a game (default)
+        \\  perft <depth>                     Run perft test
+        \\  serve                             Start HTTP API server
+        \\  parse-openings <path> <color>     Parse opening lines to book entries
         \\
         \\Options for play:
         \\  --mode hvh        Human vs Human (default)
@@ -343,4 +375,5 @@ test {
     _ = search_mod;
     _ = tt_mod;
     _ = book;
+    _ = opening_parser;
 }

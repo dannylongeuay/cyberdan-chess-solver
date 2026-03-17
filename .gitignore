@@ -8,3 +8,7 @@ result-*
 # Zig
 .zig-cache/
 zig-out/
+
+# Misc
+kis_white.txt
+kis_black.txt
