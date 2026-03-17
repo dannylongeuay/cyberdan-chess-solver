@@ -37,49 +37,49 @@ pub const BookHit = struct {
 
 const book_entries = [_]BookEntry{
     // Starting position
-    .{ .fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", .moves = &.{ "e2e4", "d2d4", "g1f3", "c2c4" } },
+    .{ .fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1", .moves = &.{ "e2e4", "d2d4" } },
 
     // After 1.e4
-    .{ .fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1", .moves = &.{ "e7e5", "c7c5", "e7e6", "c7c6" } },
+    .{ .fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1", .moves = &.{ "e7e5", "c7c5", "c7c6" } },
 
     // After 1.d4
-    .{ .fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq d3 0 1", .moves = &.{ "d7d5", "g8f6", "e7e6" } },
+    .{ .fen = "rnbqkbnr/pppppppp/8/8/3P4/8/PPP1PPPP/RNBQKBNR b KQkq - 0 1", .moves = &.{ "d7d5", "g8f6" } },
 
     // After 1.Nf3
-    .{ .fen = "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1", .moves = &.{ "d7d5", "g8f6", "c7c5" } },
+    .{ .fen = "rnbqkbnr/pppppppp/8/8/8/5N2/PPPPPPPP/RNBQKB1R b KQkq - 1 1", .moves = &.{"d7d5"} },
 
     // After 1.c4 (English)
-    .{ .fen = "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq c3 0 1", .moves = &.{ "e7e5", "g8f6", "c7c5" } },
+    .{ .fen = "rnbqkbnr/pppppppp/8/8/2P5/8/PP1PPPPP/RNBQKBNR b KQkq - 0 1", .moves = &.{"e7e5"} },
 
     // After 1.e4 e5
-    .{ .fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq e6 0 2", .moves = &.{ "g1f3", "f1c4", "f2f4" } },
+    .{ .fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", .moves = &.{"g1f3"} },
 
     // After 1.e4 c5 (Sicilian)
-    .{ .fen = "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2", .moves = &.{ "g1f3", "b1c3", "d2d4" } },
+    .{ .fen = "rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", .moves = &.{"g1f3"} },
 
     // After 1.e4 e6 (French)
-    .{ .fen = "rnbqkbnr/pppp1ppp/4p3/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", .moves = &.{ "d2d4", "d2d3", "g1f3" } },
+    .{ .fen = "rnbqkbnr/pppp1ppp/4p3/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", .moves = &.{"d2d4"} },
 
     // After 1.e4 c6 (Caro-Kann)
-    .{ .fen = "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", .moves = &.{ "d2d4", "b1c3", "g1f3" } },
+    .{ .fen = "rnbqkbnr/pp1ppppp/2p5/8/4P3/8/PPPP1PPP/RNBQKBNR w KQkq - 0 2", .moves = &.{"d2d4"} },
 
     // After 1.d4 d5
-    .{ .fen = "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq d6 0 2", .moves = &.{ "c2c4", "g1f3", "b1c3" } },
+    .{ .fen = "rnbqkbnr/ppp1pppp/8/3p4/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 0 2", .moves = &.{"g1f3"} },
 
     // After 1.d4 Nf6
-    .{ .fen = "rnbqkb1r/pppppppp/5n2/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 1 2", .moves = &.{ "c2c4", "g1f3", "c1g5" } },
+    .{ .fen = "rnbqkb1r/pppppppp/5n2/8/3P4/8/PPP1PPPP/RNBQKBNR w KQkq - 1 2", .moves = &.{"c2c4"} },
 
     // After 1.e4 e5 2.Nf3
-    .{ .fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2", .moves = &.{ "b8c6", "g8f6" } },
+    .{ .fen = "rnbqkbnr/pppp1ppp/8/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R b KQkq - 1 2", .moves = &.{"b8c6"} },
 
     // After 1.d4 Nf6 2.c4
-    .{ .fen = "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2", .moves = &.{ "e7e6", "g7g6", "c7c5" } },
+    .{ .fen = "rnbqkb1r/pppppppp/5n2/8/2PP4/8/PP2PPPP/RNBQKBNR b KQkq - 0 2", .moves = &.{"e7e6"} },
 
     // After 1.d4 d5 2.c4 (Queen's Gambit)
-    .{ .fen = "rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2", .moves = &.{ "e7e6", "c7c6", "d5c4" } },
+    .{ .fen = "rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq - 0 2", .moves = &.{"c7c6"} },
 
     // After 1.e4 e5 2.Nf3 Nc6
-    .{ .fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3", .moves = &.{ "f1b5", "f1c4", "d2d4" } },
+    .{ .fen = "r1bqkbnr/pppp1ppp/2n5/4p3/4P3/5N2/PPPP1PPP/RNBQKB1R w KQkq - 2 3", .moves = &.{"f1b5"} },
 };
 
 // ── Comptime table builder ────────────────────────────────────────────
