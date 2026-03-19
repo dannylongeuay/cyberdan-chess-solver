@@ -218,9 +218,14 @@ pub const Board = struct {
             .double_pawn_push => {
                 self.movePiece(from, to, .{ .color = us, .piece_type = .pawn });
                 self.halfmove_clock = 0;
-                // En passant target is the square the pawn passed through
-                self.en_passant = if (us == .white) from + 8 else from - 8;
-                self.hash ^= Zobrist.instance.en_passant_keys[from & 7];
+                // Only set en passant if an enemy pawn can actually capture
+                const ep_sq: u6 = if (us == .white) from + 8 else from - 8;
+                const them_idx = @intFromEnum(them);
+                const enemy_pawns = self.pieces[them_idx][@intFromEnum(PieceType.pawn)];
+                if (attacks.pawn_attacks[@intFromEnum(us)][ep_sq] & enemy_pawns != 0) {
+                    self.en_passant = ep_sq;
+                    self.hash ^= Zobrist.instance.en_passant_keys[from & 7];
+                }
             },
             .king_castle => {
                 self.movePiece(from, to, .{ .color = us, .piece_type = .king });
@@ -649,7 +654,8 @@ test "makeMove/unmakeMove restores board" {
     const undo = board.makeMove(e2e4);
 
     try std.testing.expect(board.hash != original_hash);
-    try std.testing.expect(board.en_passant != null);
+    // From starting position, no enemy pawn can capture en passant, so ep square is not set
+    try std.testing.expect(board.en_passant == null);
 
     board.unmakeMove(e2e4, undo);
 
@@ -658,6 +664,74 @@ test "makeMove/unmakeMove restores board" {
     // Verify board is exactly the starting position
     var buf: [100]u8 = undefined;
     try std.testing.expectEqualStrings(Board.starting_fen, board.toFen(&buf));
+}
+
+test "double pawn push sets en passant when enemy pawn can capture" {
+    // Black pawn on d4, white plays e2-e4 → ep square should be e3
+    var board = try Board.fromFen("rnbqkbnr/ppp1pppp/8/8/3p4/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    const e2e4 = Move{ .from = @intFromEnum(Square.e2), .to = @intFromEnum(Square.e4), .flags = .double_pawn_push };
+    _ = board.makeMove(e2e4);
+
+    try std.testing.expectEqual(@intFromEnum(Square.e3), board.en_passant.?);
+
+    // FEN should show e3 as ep square
+    var buf: [100]u8 = undefined;
+    const fen = board.toFen(&buf);
+    try std.testing.expect(std.mem.indexOf(u8, fen, " e3 ") != null);
+}
+
+test "double pawn push sets en passant with enemy pawn on other side" {
+    // Black pawn on f4, white plays e2-e4 → ep square should be e3
+    var board = try Board.fromFen("rnbqkbnr/ppppp1pp/8/8/5p2/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    const e2e4 = Move{ .from = @intFromEnum(Square.e2), .to = @intFromEnum(Square.e4), .flags = .double_pawn_push };
+    _ = board.makeMove(e2e4);
+
+    try std.testing.expectEqual(@intFromEnum(Square.e3), board.en_passant.?);
+}
+
+test "double pawn push no en passant without adjacent enemy pawn" {
+    // No black pawns near e-file on 4th rank, white plays e2-e4 → no ep
+    var board = try Board.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    const e2e4 = Move{ .from = @intFromEnum(Square.e2), .to = @intFromEnum(Square.e4), .flags = .double_pawn_push };
+    _ = board.makeMove(e2e4);
+
+    try std.testing.expect(board.en_passant == null);
+
+    var buf: [100]u8 = undefined;
+    const fen = board.toFen(&buf);
+    try std.testing.expect(std.mem.indexOf(u8, fen, " - ") != null);
+}
+
+test "black double pawn push sets en passant when white pawn can capture" {
+    // White pawn on e5, black plays d7-d5 → ep square should be d6
+    var board = try Board.fromFen("rnbqkbnr/pppppppp/8/4P3/8/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1");
+    const d7d5 = Move{ .from = @intFromEnum(Square.d7), .to = @intFromEnum(Square.d5), .flags = .double_pawn_push };
+    _ = board.makeMove(d7d5);
+
+    try std.testing.expectEqual(@intFromEnum(Square.d6), board.en_passant.?);
+}
+
+test "black double pawn push no en passant without adjacent white pawn" {
+    // No white pawns near d-file on 5th rank, black plays d7-d5 → no ep
+    var board = try Board.fromFen("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1");
+    const d7d5 = Move{ .from = @intFromEnum(Square.d7), .to = @intFromEnum(Square.d5), .flags = .double_pawn_push };
+    _ = board.makeMove(d7d5);
+
+    try std.testing.expect(board.en_passant == null);
+}
+
+test "en passant unmake restores null ep square" {
+    // Black pawn on d4, white plays e2-e4 (sets ep), then unmake should clear it
+    var board = try Board.fromFen("rnbqkbnr/ppp1pppp/8/8/3p4/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
+    const original_hash = board.hash;
+    const e2e4 = Move{ .from = @intFromEnum(Square.e2), .to = @intFromEnum(Square.e4), .flags = .double_pawn_push };
+    const undo = board.makeMove(e2e4);
+
+    try std.testing.expect(board.en_passant != null);
+
+    board.unmakeMove(e2e4, undo);
+    try std.testing.expect(board.en_passant == null);
+    try std.testing.expectEqual(original_hash, board.hash);
 }
 
 test "makeNullMove/unmakeNullMove restores board" {
