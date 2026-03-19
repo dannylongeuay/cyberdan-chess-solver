@@ -27,12 +27,16 @@ pub const SearchOptions = struct {
     timeout_ns: ?u64 = null, // null = no timeout (depth-only)
 };
 
+const MAX_PLY = 128;
+
 const SearchContext = struct {
     nodes: u64 = 0,
     stopped: bool = false,
     timer: ?std.time.Timer = null,
     timeout_ns: ?u64 = null,
     tt: ?*TranspositionTable = null,
+    killers: [MAX_PLY][2]u16 = [_][2]u16{.{ 0, 0 }} ** MAX_PLY,
+    history: [2][6][64]i32 = [_][6][64]i32{[_][64]i32{[_]i32{0} ** 64} ** 6} ** 2,
 
     fn init(options: SearchOptions, tt: ?*TranspositionTable) SearchContext {
         return .{
@@ -42,6 +46,17 @@ const SearchContext = struct {
             .timeout_ns = options.timeout_ns,
             .tt = tt,
         };
+    }
+
+    /// Age history scores between iterative deepening iterations.
+    fn ageHistory(self: *SearchContext) void {
+        for (0..2) |color| {
+            for (0..6) |piece| {
+                for (0..64) |sq| {
+                    self.history[color][piece][sq] = @divTrunc(self.history[color][piece][sq], 2);
+                }
+            }
+        }
     }
 
     fn incrementNodes(self: *SearchContext) void {
@@ -103,6 +118,8 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
 
     var depth: u32 = 1;
     while (depth <= options.max_depth) : (depth += 1) {
+        if (depth > 1) ctx.ageHistory();
+
         const result = search(board, depth, &ctx);
 
         // If stopped mid-search, discard partial result
@@ -147,7 +164,7 @@ fn search(board: *Board, depth: u32, ctx: *SearchContext) SearchResult {
         }
     }
 
-    var scored = scoreMoves(board, legal, tt_move_raw);
+    var scored = scoreMoves(board, legal, tt_move_raw, ctx, 0);
     var best_move: ?Move = null;
     var best_score: i32 = -eval_mod.CHECKMATE_SCORE - 1;
     var alpha: i32 = -eval_mod.CHECKMATE_SCORE - 1;
@@ -245,7 +262,7 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         return eval_mod.DRAW_SCORE;
     }
 
-    var scored = scoreMoves(board, legal, tt_move_raw);
+    var scored = scoreMoves(board, legal, tt_move_raw, ctx, ply);
     var best_move_raw: u16 = 0;
     var best_score: i32 = -eval_mod.CHECKMATE_SCORE - 1;
     var moves_searched: u32 = 0;
@@ -285,6 +302,20 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         }
 
         if (score >= beta) {
+            // Update killer moves and history on beta cutoff for quiet moves
+            if (is_quiet and ply < MAX_PLY) {
+                const move_raw: u16 = @bitCast(move);
+                // Update killers: shift slot 0 to slot 1, store new in slot 0
+                if (ctx.killers[ply][0] != move_raw) {
+                    ctx.killers[ply][1] = ctx.killers[ply][0];
+                    ctx.killers[ply][0] = move_raw;
+                }
+                // Update history: increment by depth^2
+                const us_idx = @intFromEnum(board.side_to_move);
+                const piece = board.getPieceTypeAt(move.from, us_idx);
+                ctx.history[us_idx][@intFromEnum(piece)][move.to] += @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
+            }
+
             // Store beta cutoff in TT
             if (ctx.tt) |tt| {
                 tt.store(board.hash, @intCast(depth), tt_mod.scoreToTT(score, ply), .beta, @bitCast(move));
@@ -330,7 +361,7 @@ fn quiescence(board: *Board, alpha_in: i32, beta: i32, ctx: *SearchContext, ply:
         }
 
         const legal = movegen.generateLegalMoves(board);
-        var scored = scoreMoves(board, legal, 0);
+        var scored = scoreMoves(board, legal, 0, ctx, ply);
 
         for (0..scored.count) |i| {
             pickMove(&scored, i);
@@ -363,7 +394,7 @@ fn quiescence(board: *Board, alpha_in: i32, beta: i32, ctx: *SearchContext, ply:
         return -eval_mod.CHECKMATE_SCORE + @as(i32, @intCast(ply));
     }
 
-    var scored = scoreMoves(board, legal, 0);
+    var scored = scoreMoves(board, legal, 0, ctx, ply);
     var alpha = alpha_in;
 
     for (0..scored.count) |i| {
@@ -395,9 +426,9 @@ fn isPawnEndgame(board: *const Board) bool {
         board.pieces[us][@intFromEnum(PieceType.queen)] == 0;
 }
 
-/// MVV-LVA scoring with TT move priority.
-/// TT move gets 20_000_000, captures get 10_000_000 + MVV-LVA, quiet moves get 0.
-fn scoreMoves(board: *const Board, legal: MoveList, tt_move_raw: u16) ScoredMoveList {
+/// MVV-LVA scoring with TT move priority, killer moves, and history heuristic.
+/// TT move: 20M, captures: 10M + MVV-LVA, killers: 9M, quiets: history score.
+fn scoreMoves(board: *const Board, legal: MoveList, tt_move_raw: u16, ctx: *const SearchContext, ply: u32) ScoredMoveList {
     var result: ScoredMoveList = undefined;
     result.count = legal.count;
 
@@ -407,9 +438,10 @@ fn scoreMoves(board: *const Board, legal: MoveList, tt_move_raw: u16) ScoredMove
     for (0..legal.count) |i| {
         const move = legal.moves[i];
         result.moves[i] = move;
+        const move_raw: u16 = @bitCast(move);
 
         // TT move gets highest priority
-        if (tt_move_raw != 0 and @as(u16, @bitCast(move)) == tt_move_raw) {
+        if (tt_move_raw != 0 and move_raw == tt_move_raw) {
             result.scores[i] = 20_000_000;
         } else if (move.flags.isCapture()) {
             const attacker = board.getPieceTypeAt(move.from, us_idx);
@@ -422,8 +454,13 @@ fn scoreMoves(board: *const Board, legal: MoveList, tt_move_raw: u16) ScoredMove
                 eval_mod.piece_values[@intFromEnum(board.getPieceTypeAt(move.to, them_idx))];
 
             result.scores[i] = 10_000_000 + victim_val * 100 - attacker_val;
+        } else if (ply < MAX_PLY and (move_raw == ctx.killers[ply][0] or move_raw == ctx.killers[ply][1])) {
+            // Killer moves score below captures but above history
+            result.scores[i] = 9_000_000;
         } else {
-            result.scores[i] = 0;
+            // History heuristic for quiet moves
+            const piece = board.getPieceTypeAt(move.from, us_idx);
+            result.scores[i] = ctx.history[us_idx][@intFromEnum(piece)][move.to];
         }
     }
 
