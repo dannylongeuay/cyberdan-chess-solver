@@ -326,6 +326,24 @@ The hash is updated incrementally during `makeMove`/`unmakeMove`, avoiding full
 recomputation. All Zobrist keys are generated at comptime via a seeded 
 xorshift64 PRNG.
 
+### Search
+
+The engine uses **iterative deepening** with timeout support, progressively searching deeper until time runs out or a maximum depth is reached. Each iteration uses **negamax with alpha-beta pruning** enhanced by several techniques:
+
+- **Transposition table** &mdash; hash-indexed cache storing exact, upper, and lower bound scores along with the best move. Uses age-based replacement (stale entries from previous searches are overwritten first) and adjusts mate scores by ply distance for correct storage/retrieval across different tree depths
+- **Null move pruning** &mdash; skips a turn and searches at reduced depth (`r = 2 + depth/6`) with a zero-window to detect positions where the opponent can't improve even with a free move. Disabled when in check or in pawn endgames (high zugzwang risk)
+- **Late move reductions (LMR)** &mdash; searches later quiet moves at reduced depth using a log-based reduction table (`0.75 + ln(depth) * ln(moveIndex) / 2.25`). Applied at depth >= 3 after the first 3 moves, excluding captures, promotions, and moves that give check. Re-searches at full depth if the reduced search improves alpha
+- **Quiescence search** &mdash; extends the search at leaf nodes by examining captures only (with stand-pat pruning) to avoid the horizon effect. When in check, searches all evasions and detects checkmate
+- **Move ordering**: TT move > captures (MVV-LVA) > killer moves (2 per ply) > history heuristic. History scores use gravity clamping (`bonus - |entry| * bonus / max`), are aged (halved) between iterations, and quiet moves that fail to cause a beta cutoff receive a malus
+
+### Evaluation
+
+The engine uses **tapered evaluation**, interpolating between middlegame (MG) and endgame (EG) scores based on remaining material:
+
+- **Phase calculation** &mdash; each piece type has a phase weight (knight/bishop = 1, rook = 2, queen = 4; max phase = 24). The final score blends MG and EG proportionally: `(mg * phase + eg * (24 - phase)) / 24`
+- **Material values** &mdash; separate MG and EG values per piece type. Pawns are worth more in endgames (120 vs 100 centipawns); minor pieces slightly less (300/310 vs 320/330)
+- **Piece-square tables** &mdash; separate 64-entry MG and EG tables for all six piece types. Key differences: MG king tables reward castled positions while EG tables reward centralization; EG pawn tables strongly reward advancement. Black uses vertically mirrored tables (`sq ^ 56`)
+
 ### Game State
 
 `GameState` wraps `Board` with a 1024-entry history array tracking each move's hash, move, and undo info. This enables:
@@ -352,5 +370,10 @@ xorshift64 PRNG.
 | `game.zig` | Game state, history, draw/checkmate detection |
 | `display.zig` | Board display for terminal output |
 | `notation.zig` | SAN and long algebraic notation parsing/formatting |
+| `eval.zig` | Tapered evaluation, material values, piece-square tables |
+| `search.zig` | Iterative deepening, alpha-beta, NMP, LMR, move ordering |
+| `tt.zig` | Transposition table with age-based replacement |
+| `book.zig` | Opening book lookup |
+| `opening_parser.zig` | Opening book data parsing |
 | `random.zig` | Random move selection (for computer opponent) |
 | `server.zig` | HTTP API server with move validation and game state endpoints |
