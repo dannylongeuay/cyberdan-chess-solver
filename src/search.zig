@@ -28,6 +28,7 @@ pub const SearchOptions = struct {
 };
 
 const MAX_PLY = 128;
+const MAX_HISTORY: i32 = 16384;
 
 const SearchContext = struct {
     nodes: u64 = 0,
@@ -46,6 +47,12 @@ const SearchContext = struct {
             .timeout_ns = options.timeout_ns,
             .tt = tt,
         };
+    }
+
+    fn updateHistory(self: *SearchContext, color: usize, piece: PieceType, to: u6, bonus: i32) void {
+        const entry = &self.history[color][@intFromEnum(piece)][to];
+        const abs_entry: i32 = if (entry.* < 0) -entry.* else entry.*;
+        entry.* += bonus - @divTrunc(abs_entry * bonus, MAX_HISTORY);
     }
 
     /// Age history scores between iterative deepening iterations.
@@ -266,6 +273,8 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
     var best_move_raw: u16 = 0;
     var best_score: i32 = -eval_mod.CHECKMATE_SCORE - 1;
     var moves_searched: u32 = 0;
+    var quiets_searched: [256]Move = undefined;
+    var quiets_count: usize = 0;
 
     for (0..scored.count) |i| {
         pickMove(&scored, i);
@@ -310,10 +319,18 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
                     ctx.killers[ply][1] = ctx.killers[ply][0];
                     ctx.killers[ply][0] = move_raw;
                 }
-                // Update history: increment by depth^2
+                // Update history with gravity clamping
                 const us_idx = @intFromEnum(board.side_to_move);
                 const piece = board.getPieceTypeAt(move.from, us_idx);
-                ctx.history[us_idx][@intFromEnum(piece)][move.to] += @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
+                const bonus = @as(i32, @intCast(depth)) * @as(i32, @intCast(depth));
+                ctx.updateHistory(us_idx, piece, move.to, bonus);
+
+                // Malus: penalize all quiet moves that failed to cause cutoff
+                for (0..quiets_count) |qi| {
+                    const q = quiets_searched[qi];
+                    const q_piece = board.getPieceTypeAt(q.from, us_idx);
+                    ctx.updateHistory(us_idx, q_piece, q.to, -bonus);
+                }
             }
 
             // Store beta cutoff in TT
@@ -324,6 +341,13 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         }
         if (score > alpha) {
             alpha = score;
+        }
+
+        if (is_quiet) {
+            if (quiets_count < quiets_searched.len) {
+                quiets_searched[quiets_count] = move;
+                quiets_count += 1;
+            }
         }
 
         moves_searched += 1;
