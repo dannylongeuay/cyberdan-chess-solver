@@ -247,3 +247,65 @@ test "taper interpolates between MG and EG based on phase" {
     // Also verify the scores are actually different (taper is doing something)
     try std.testing.expect(high_score != low_score);
 }
+
+test "symmetry — mirrored non-starting position evaluates to 0" {
+    // Sicilian-like mirror: both sides have same pawn structure and pieces
+    // Symmetric position: pawns on c3/c6, knights on f3/f6, everything else standard-ish
+    // Simplest: just a symmetric position with moved pieces
+    // 4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1
+    const board = Board.fromFen("4k3/pppppppp/8/8/8/8/PPPPPPPP/4K3 w - - 0 1") catch unreachable;
+    const score = evaluate(&board);
+    try std.testing.expectEqual(@as(i32, 0), score);
+}
+
+test "bishop pair vs knight pair — bishops score higher" {
+    // White has two bishops, black has two knights, otherwise equal
+    // 4k3/pppppppp/8/8/8/8/PPPPPPPP/2B1KB2 w - - 0 1 (white: K+2B+8P)
+    // 4k3/pppppppp/8/8/8/8/PPPPPPPP/2N1KN2 w - - 0 1 (white: K+2N+8P)
+    // But we need black to have the opposite. Let's do:
+    // White: K+2B, Black: K+2N, equal pawns
+    const bb_pos = Board.fromFen("1n2kn2/pppppppp/8/8/8/8/PPPPPPPP/2B1KB2 w - - 0 1") catch unreachable;
+    const nn_pos = Board.fromFen("1b2kb2/pppppppp/8/8/8/8/PPPPPPPP/2N1KN2 w - - 0 1") catch unreachable;
+    const bb_score = evaluate(&bb_pos);
+    const nn_score = evaluate(&nn_pos);
+    // Bishop pair (330 each) vs knight pair (320 each) — bishops should score higher for white
+    // bb_pos: white has bishops (advantage), black has knights
+    // nn_pos: white has knights, black has bishops (disadvantage)
+    try std.testing.expect(bb_score > nn_score);
+}
+
+test "passed pawn on 7th rank scores high in endgame" {
+    // Low-material endgame with white pawn on 7th rank
+    // 4k3/4P3/8/8/8/8/8/4K3 w - - 0 1
+    const pawn_7th = Board.fromFen("4k3/4P3/8/8/8/8/8/4K3 w - - 0 1") catch unreachable;
+    // Same but pawn on 2nd rank
+    // 4k3/8/8/8/8/8/4P3/4K3 w - - 0 1
+    const pawn_2nd = Board.fromFen("4k3/8/8/8/8/8/4P3/4K3 w - - 0 1") catch unreachable;
+    const score_7th = evaluate(&pawn_7th);
+    const score_2nd = evaluate(&pawn_2nd);
+    // 7th rank pawn should score significantly higher (EG PST bonus of 80 vs 10)
+    try std.testing.expect(score_7th > score_2nd);
+    try std.testing.expect(score_7th - score_2nd >= 50);
+}
+
+test "side-to-move perspective flips correctly" {
+    // Symmetric position with white having a material edge (extra pawn on e4).
+    // Evaluate with white-to-move and black-to-move; scores should be negatives.
+    const wtm = Board.fromFen("4k3/pppppppp/8/8/4P3/8/PPPP1PPP/4K3 w - - 0 1") catch unreachable;
+    const btm = Board.fromFen("4k3/pppppppp/8/8/4P3/8/PPPP1PPP/4K3 b - - 0 1") catch unreachable;
+    const score_w = evaluate(&wtm);
+    const score_b = evaluate(&btm);
+    // White has an extra pawn, so score_w > 0 and score_b < 0
+    try std.testing.expect(score_w > 0);
+    try std.testing.expectEqual(score_w, -score_b);
+}
+
+test "phase clamping works with extra queens from promotions" {
+    // Position with 3 white queens (2 promoted) — phase should clamp to TOTAL_PHASE
+    // 4k3/8/8/8/8/8/8/QQ1QK3 w - - 0 1
+    const board = Board.fromFen("4k3/8/8/8/8/8/8/QQ1QK3 w - - 0 1") catch unreachable;
+    const score = evaluate(&board);
+    // Should not crash or produce absurd values. With 3 queens, white should be way ahead.
+    try std.testing.expect(score > 2000);
+    try std.testing.expect(score < CHECKMATE_SCORE);
+}

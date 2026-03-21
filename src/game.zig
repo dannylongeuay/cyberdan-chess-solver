@@ -204,3 +204,61 @@ test "insufficient material" {
     var game3 = try GameState.initFromFen("4k3/8/8/8/8/8/8/4KR2 w - - 0 1");
     try std.testing.expect(!game3.isInsufficientMaterial());
 }
+
+test "threefold repetition detection" {
+    // Start from a simple position and repeat moves: Ke1-e2-e1-e2-e1
+    // But we need both sides to move. Let's use kings shuffling:
+    // 4k3/8/8/8/8/8/8/4K3 w - - 0 1
+    // 1.Ke2 Ke7 2.Ke1 Ke8 3.Ke2 Ke7 — after 3...Ke7 the position repeats for the 3rd time.
+    // Actually: position after move 0: Ke1,Ke8. After 1.Ke2 Ke7: Ke2,Ke7.
+    // After 2.Ke1 Ke8: Ke1,Ke8 (same as start = 2nd occurrence).
+    // After 3.Ke2 Ke7: Ke2,Ke7 (same as after move 1 = 2nd occurrence).
+    // After 4.Ke1 Ke8: Ke1,Ke8 (3rd occurrence!)
+    // Use halfmove_clock > 0 so the irreversible-move check doesn't stop the scan early
+    var game = try GameState.initFromFen("4k3/8/8/8/8/8/8/4K3 w - - 10 1");
+
+    const sq = @import("square.zig").Square;
+
+    const e1: u6 = @intFromEnum(sq.e1);
+    const e2: u6 = @intFromEnum(sq.e2);
+    const e8: u6 = @intFromEnum(sq.e8);
+    const e7: u6 = @intFromEnum(sq.e7);
+
+    const ke1_e2 = Move{ .from = e1, .to = e2, .flags = .quiet };
+    const ke8_e7 = Move{ .from = e8, .to = e7, .flags = .quiet };
+    const ke2_e1 = Move{ .from = e2, .to = e1, .flags = .quiet };
+    const ke7_e8 = Move{ .from = e7, .to = e8, .flags = .quiet };
+
+    // Round 1
+    game.makeMove(ke1_e2); // w: Ke2
+    game.makeMove(ke8_e7); // b: Ke7
+    try std.testing.expect(!game.isThreefoldRepetition());
+
+    // Round 2 — back to start
+    game.makeMove(ke2_e1); // w: Ke1
+    game.makeMove(ke7_e8); // b: Ke8 (2nd occurrence of starting position)
+    try std.testing.expect(!game.isThreefoldRepetition());
+
+    // Round 3
+    game.makeMove(ke1_e2); // w: Ke2
+    game.makeMove(ke8_e7); // b: Ke7 (2nd occurrence of Ke2/Ke7)
+    try std.testing.expect(!game.isThreefoldRepetition());
+
+    // Round 4 — back to start again
+    game.makeMove(ke2_e1); // w: Ke1
+    game.makeMove(ke7_e8); // b: Ke8 (3rd occurrence!)
+    try std.testing.expect(game.isThreefoldRepetition());
+}
+
+test "fifty-move rule detection" {
+    // Set up position with halfmove_clock = 99
+    var game = try GameState.initFromFen("4k3/8/8/8/8/8/8/4K3 w - - 99 50");
+    try std.testing.expect(!game.isFiftyMoveRule()); // 99 < 100
+
+    // Make one more non-capture, non-pawn move — clock becomes 100
+    const e1: u6 = @intFromEnum(@import("square.zig").Square.e1);
+    const e2: u6 = @intFromEnum(@import("square.zig").Square.e2);
+    const ke1_e2 = moves_mod.Move{ .from = e1, .to = e2, .flags = .quiet };
+    game.makeMove(ke1_e2);
+    try std.testing.expect(game.isFiftyMoveRule()); // 100 >= 100
+}

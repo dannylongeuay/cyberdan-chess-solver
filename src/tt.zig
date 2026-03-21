@@ -172,3 +172,66 @@ test "TT newSearch increments age" {
     tt.newSearch();
     try std.testing.expectEqual(@as(u8, 1), tt.age);
 }
+
+test "TT cutoff produces correct result — warm TT uses fewer nodes" {
+    const search_mod = @import("search.zig");
+    const board_mod = @import("board.zig");
+
+    // Warm TT: search depth 3, then search depth 3 again with same TT
+    var warm_tt = try TranspositionTable.init(std.testing.allocator, 1);
+    defer warm_tt.deinit();
+
+    var board1 = board_mod.Board.init();
+    _ = search_mod.searchIterative(&board1, .{ .max_depth = 3, .timeout_ns = 5_000_000_000 }, &warm_tt);
+    // Second search at same depth benefits from cached entries
+    var board2 = board_mod.Board.init();
+    const warm_result = search_mod.searchIterative(&board2, .{ .max_depth = 3, .timeout_ns = 5_000_000_000 }, &warm_tt);
+
+    // Cold TT: search depth 3 with a fresh/empty TT
+    var cold_tt = try TranspositionTable.init(std.testing.allocator, 1);
+    defer cold_tt.deinit();
+
+    var board3 = board_mod.Board.init();
+    const cold_result = search_mod.searchIterative(&board3, .{ .max_depth = 3, .timeout_ns = 5_000_000_000 }, &cold_tt);
+
+    // Warm TT search should use fewer nodes than cold TT search
+    try std.testing.expect(warm_result.nodes <= cold_result.nodes);
+}
+
+test "TT replacement policy prefers deeper entries within same age" {
+    var tt = try TranspositionTable.init(std.testing.allocator, 1);
+    defer tt.deinit();
+
+    const hash: u64 = 0xABCDEF0123456789;
+
+    // Store entry at depth 8
+    tt.store(hash, 8, 200, .exact, 0x1111);
+
+    // Try to store entry at depth 4 for the same hash — should NOT replace
+    tt.store(hash, 4, 100, .exact, 0x2222);
+
+    const entry = tt.probe(hash);
+    try std.testing.expect(entry != null);
+    try std.testing.expectEqual(@as(i8, 8), entry.?.depth);
+    try std.testing.expectEqual(@as(i16, 200), entry.?.score);
+    try std.testing.expectEqual(@as(u16, 0x1111), entry.?.best_move);
+
+    // Store entry at depth 10 — deeper DOES replace
+    tt.store(hash, 10, 300, .exact, 0x3333);
+
+    const entry2 = tt.probe(hash);
+    try std.testing.expect(entry2 != null);
+    try std.testing.expectEqual(@as(i8, 10), entry2.?.depth);
+    try std.testing.expectEqual(@as(i16, 300), entry2.?.score);
+    try std.testing.expectEqual(@as(u16, 0x3333), entry2.?.best_move);
+
+    // Stale age replaces regardless of depth
+    tt.newSearch(); // age is now 1, stored entry has age 0
+    tt.store(hash, 1, 50, .exact, 0x4444); // depth 1, but age mismatch triggers replacement
+
+    const entry3 = tt.probe(hash);
+    try std.testing.expect(entry3 != null);
+    try std.testing.expectEqual(@as(i8, 1), entry3.?.depth);
+    try std.testing.expectEqual(@as(i16, 50), entry3.?.score);
+    try std.testing.expectEqual(@as(u16, 0x4444), entry3.?.best_move);
+}

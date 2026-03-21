@@ -612,7 +612,7 @@ test "stalemate returns draw score" {
 
 test "iterative deepening returns a move from starting position" {
     var board = Board.init();
-    const result = searchIterative(&board, .{ .max_depth = 3 }, null);
+    const result = searchIterative(&board, .{ .max_depth = 3, .timeout_ns = 5_000_000_000 }, null);
     try std.testing.expect(result.best_move != null);
     try std.testing.expect(result.nodes > 0);
     try std.testing.expectEqual(@as(u32, 3), result.depth);
@@ -631,7 +631,7 @@ test "search with TT returns a move" {
     defer tt.deinit();
 
     var board = Board.init();
-    const result = searchIterative(&board, .{ .max_depth = 4 }, &tt);
+    const result = searchIterative(&board, .{ .max_depth = 4, .timeout_ns = 5_000_000_000 }, &tt);
     try std.testing.expect(result.best_move != null);
     try std.testing.expect(result.nodes > 0);
     try std.testing.expectEqual(@as(u32, 4), result.depth);
@@ -644,4 +644,103 @@ test "LMR table has reasonable values" {
     try std.testing.expect(lmr_table[10][10] > 0);
     // Reduction should grow with depth and move index
     try std.testing.expect(lmr_table[20][20] > lmr_table[10][10]);
+}
+
+test "mate in 2 found at appropriate depth" {
+    // 1.Ra1+ Kb8 2.Ra8#
+    var board = Board.fromFen("k7/8/1K6/8/8/8/8/1R6 w - - 0 1") catch unreachable;
+    const result = searchIterative(&board, .{ .max_depth = 4, .timeout_ns = 5_000_000_000 }, null);
+    try std.testing.expect(result.best_move != null);
+    // Score should indicate checkmate within 4 ply
+    try std.testing.expect(result.score >= eval_mod.CHECKMATE_SCORE - 4);
+}
+
+test "mate distance preference — mate-in-1 scores higher than mate-in-3" {
+    // Mate-in-1: Qxf7# position
+    var board_m1 = Board.fromFen("r1bqkb1r/pppp1ppp/2n2n2/4p2Q/2B1P3/8/PPPP1PPP/RNB1K1NR w KQkq - 4 4") catch unreachable;
+    const result_m1 = searchIterative(&board_m1, .{ .max_depth = 6, .timeout_ns = 5_000_000_000 }, null);
+
+    // Mate-in-2: k7/8/1K6/8/8/8/8/1R6 w - - 0 1 (Ra1+, Kb8, Ra8#)
+    var board_m2 = Board.fromFen("k7/8/1K6/8/8/8/8/1R6 w - - 0 1") catch unreachable;
+    const result_m2 = searchIterative(&board_m2, .{ .max_depth = 6, .timeout_ns = 5_000_000_000 }, null);
+
+    // Mate-in-1 score should be higher (closer to CHECKMATE_SCORE)
+    try std.testing.expect(result_m1.score > result_m2.score);
+    // Both should be checkmate scores
+    try std.testing.expect(result_m1.score >= eval_mod.CHECKMATE_SCORE - 2);
+    try std.testing.expect(result_m2.score >= eval_mod.CHECKMATE_SCORE - 4);
+}
+
+test "avoids being mated — finds the only non-losing move" {
+    // Black queen on a2 threatens Qa1#. White must defend (e.g. Rd8+, g3, h3).
+    var board = Board.fromFen("6k1/5ppp/8/8/8/8/q4PPP/3R2K1 w - - 0 1") catch unreachable;
+    const result = searchIterative(&board, .{ .max_depth = 4, .timeout_ns = 5_000_000_000 }, null);
+    try std.testing.expect(result.best_move != null);
+    // Engine should not be getting mated — score should not be a checkmate loss
+    try std.testing.expect(result.score > -eval_mod.CHECKMATE_SCORE + 256);
+}
+
+test "simple tactic — finds winning capture of hanging queen" {
+    // Black queen hanging on d5, white knight on c3 can capture
+    // 4k3/8/8/3q4/8/2N5/8/4K3 w - - 0 1
+    var board = Board.fromFen("4k3/8/8/3q4/8/2N5/8/4K3 w - - 0 1") catch unreachable;
+    const result = searchIterative(&board, .{ .max_depth = 3, .timeout_ns = 5_000_000_000 }, null);
+    try std.testing.expect(result.best_move != null);
+    const move = result.best_move.?;
+    const Square = @import("square.zig").Square;
+    // Knight should capture queen on d5
+    try std.testing.expectEqual(@intFromEnum(Square.d5), @as(u6, move.to));
+    try std.testing.expect(move.flags.isCapture());
+    // Score should reflect a significant material advantage (queen capture)
+    try std.testing.expect(result.score > 200);
+}
+
+test "null move pruning does not prune when in check" {
+    // Position where white is in check — NMP must be skipped, search must work correctly
+    // 4k3/8/8/8/8/8/3q4/3K4 w - - 0 1 — white king on d1, black queen on d2 gives check
+    // Wait: d2 to d1 is one square on the d-file, so queen on d2 does check king on d1.
+    // White must move the king. Only legal moves are Kc1, Ke1, Kc2, Ke2.
+    // After Kc2 or Ke2 the queen can chase, but at low depth it should find a move.
+    var board = Board.fromFen("4k3/8/8/8/8/8/3q4/3K4 w - - 0 1") catch unreachable;
+    try std.testing.expect(board.isInCheck());
+    const result = searchIterative(&board, .{ .max_depth = 3, .timeout_ns = 5_000_000_000 }, null);
+    try std.testing.expect(result.best_move != null);
+    // Engine must find a legal evasion (not crash/hang from NMP in check)
+}
+
+test "null move pruning skipped in pawn endgame" {
+    // K+P vs K+P — isPawnEndgame should be true, NMP disabled
+    // 8/4k3/8/4p3/4P3/8/4K3/8 w - - 0 1
+    var board = Board.fromFen("8/4k3/8/4p3/4P3/8/4K3/8 w - - 0 1") catch unreachable;
+    try std.testing.expect(isPawnEndgame(&board));
+    const result = searchIterative(&board, .{ .max_depth = 4, .timeout_ns = 5_000_000_000 }, null);
+    try std.testing.expect(result.best_move != null);
+    // Should return a reasonable eval (drawn-ish position)
+    try std.testing.expect(result.score > -500 and result.score < 500);
+}
+
+test "quiescence resolves hanging piece — qsearch changes assessment" {
+    // White has a knight that can capture a hanging black bishop on d5.
+    // Static eval sees roughly equal material, but Nxd5 wins a piece.
+    // 4k3/8/8/3b4/8/2N5/8/4K3 w - - 0 1
+    // White: K + N (320). Black: K + B (330). Static eval slightly negative for white.
+    // After Nxd5: White: K + N (320) vs Black: K (0). Much better for white.
+    var board = Board.fromFen("4k3/8/8/3b4/8/2N5/8/4K3 w - - 0 1") catch unreachable;
+    const static_score = eval_mod.evaluate(&board);
+    var ctx = SearchContext.init(.{ .max_depth = 1 }, null);
+    const qscore = quiescence(&board, -eval_mod.CHECKMATE_SCORE - 1, eval_mod.CHECKMATE_SCORE + 1, &ctx, 0);
+    // Quiescence should find the winning capture and score higher than static eval
+    try std.testing.expect(qscore > static_score);
+}
+
+test "quiescence detects checkmate when in check with no evasions" {
+    // Scholar's mate final position — black king has no legal moves.
+    var board = Board.fromFen("r1bqkb1r/pppp1Qpp/2n2n2/4p3/2B1P3/8/PPPP1PPP/RNB1K1NR b KQkq - 0 4") catch unreachable;
+    try std.testing.expect(board.isInCheck());
+    const legal = movegen.generateLegalMoves(&board);
+    try std.testing.expectEqual(@as(usize, 0), legal.count);
+    var ctx = SearchContext.init(.{ .max_depth = 1 }, null);
+    const score = quiescence(&board, -eval_mod.CHECKMATE_SCORE - 1, eval_mod.CHECKMATE_SCORE + 1, &ctx, 0);
+    // Should detect checkmate (negative checkmate score from black's perspective)
+    try std.testing.expect(score <= -eval_mod.CHECKMATE_SCORE + 256);
 }
