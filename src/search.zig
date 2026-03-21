@@ -181,7 +181,20 @@ fn search(board: *Board, depth: u32, ctx: *SearchContext) SearchResult {
         pickMove(&scored, i);
         const move = scored.moves[i];
         const undo = board.makeMove(move);
-        const score = -negamax(board, depth - 1, -beta, -alpha, ctx, 1, true);
+
+        var score: i32 = undefined;
+        if (i == 0) {
+            // First move: full window search
+            score = -negamax(board, depth - 1, -beta, -alpha, ctx, 1, true);
+        } else {
+            // PVS: null window search
+            score = -negamax(board, depth - 1, -alpha - 1, -alpha, ctx, 1, true);
+            // Re-search with full window if it improved alpha
+            if (score > alpha and score < beta) {
+                score = -negamax(board, depth - 1, -beta, -alpha, ctx, 1, true);
+            }
+        }
+
         board.unmakeMove(move, undo);
 
         if (ctx.stopped) break;
@@ -291,14 +304,26 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         if (can_reduce) {
             const r = lmr_table[@min(depth, 63)][@min(moves_searched, 63)];
             const reduced_depth: u32 = if (depth > 1 + r) depth - 1 - r else 0;
-            // Null window search at reduced depth
+            // LMR: null window search at reduced depth
             score = -negamax(board, reduced_depth, -alpha - 1, -alpha, ctx, ply + 1, true);
-            // Re-search at full depth if it improved alpha
+            // If LMR fails high, re-search at full depth with null window
             if (score > alpha) {
+                score = -negamax(board, depth - 1, -alpha - 1, -alpha, ctx, ply + 1, true);
+                // PVS: if null window fails high within bounds, re-search with full window
+                if (score > alpha and score < beta) {
+                    score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
+                }
+            }
+        } else if (moves_searched == 0) {
+            // First move: full window search
+            score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
+        } else {
+            // PVS: null window search for subsequent moves
+            score = -negamax(board, depth - 1, -alpha - 1, -alpha, ctx, ply + 1, true);
+            // Re-search with full window if it improved alpha
+            if (score > alpha and score < beta) {
                 score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
             }
-        } else {
-            score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
         }
 
         board.unmakeMove(move, undo);
