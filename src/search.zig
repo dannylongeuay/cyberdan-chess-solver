@@ -36,6 +36,7 @@ const SearchContext = struct {
     timer: ?std.time.Timer = null,
     timeout_ns: ?u64 = null,
     tt: ?*TranspositionTable = null,
+    nominal_depth: u32 = 0,
     killers: [MAX_PLY][2]u16 = [_][2]u16{.{ 0, 0 }} ** MAX_PLY,
     history: [2][6][64]i32 = [_][6][64]i32{[_][64]i32{[_]i32{0} ** 64} ** 6} ** 2,
 
@@ -129,6 +130,7 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
     var depth: u32 = 1;
     while (depth <= options.max_depth) : (depth += 1) {
         if (depth > 1) ctx.ageHistory();
+        ctx.nominal_depth = depth;
 
         var result: SearchResult = undefined;
 
@@ -341,30 +343,35 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         // Late Move Reductions
         const is_quiet = !move.flags.isCapture() and !move.flags.isPromotion();
         const gives_check = board.isInCheck(); // checks side-to-move after makeMove
+
+        // Check extension: search deeper when the move gives check
+        const extension: u32 = if (gives_check and ply < 2 * ctx.nominal_depth) 1 else 0;
+        const new_depth = depth - 1 + extension;
+
         const can_reduce = moves_searched >= 3 and depth >= 3 and is_quiet and !in_check and !gives_check;
 
         if (can_reduce) {
             const r = lmr_table[@min(depth, 63)][@min(moves_searched, 63)];
-            const reduced_depth: u32 = if (depth > 1 + r) depth - 1 - r else 0;
+            const reduced_depth: u32 = if (new_depth > r) new_depth - r else 0;
             // LMR: null window search at reduced depth
             score = -negamax(board, reduced_depth, -alpha - 1, -alpha, ctx, ply + 1, true);
             // If LMR fails high, re-search at full depth with null window
             if (score > alpha) {
-                score = -negamax(board, depth - 1, -alpha - 1, -alpha, ctx, ply + 1, true);
+                score = -negamax(board, new_depth, -alpha - 1, -alpha, ctx, ply + 1, true);
                 // PVS: if null window fails high within bounds, re-search with full window
                 if (score > alpha and score < beta) {
-                    score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
+                    score = -negamax(board, new_depth, -beta, -alpha, ctx, ply + 1, true);
                 }
             }
         } else if (moves_searched == 0) {
             // First move: full window search
-            score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
+            score = -negamax(board, new_depth, -beta, -alpha, ctx, ply + 1, true);
         } else {
             // PVS: null window search for subsequent moves
-            score = -negamax(board, depth - 1, -alpha - 1, -alpha, ctx, ply + 1, true);
+            score = -negamax(board, new_depth, -alpha - 1, -alpha, ctx, ply + 1, true);
             // Re-search with full window if it improved alpha
             if (score > alpha and score < beta) {
-                score = -negamax(board, depth - 1, -beta, -alpha, ctx, ply + 1, true);
+                score = -negamax(board, new_depth, -beta, -alpha, ctx, ply + 1, true);
             }
         }
 
