@@ -110,7 +110,7 @@ const lmr_table: [64][64]u32 = blk: {
     break :blk table;
 };
 
-/// Iterative deepening entry point.
+/// Iterative deepening entry point with aspiration windows.
 pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*TranspositionTable) SearchResult {
     var best_result = SearchResult{
         .best_move = null,
@@ -123,11 +123,48 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
 
     var ctx = SearchContext.init(options, tt);
 
+    const INITIAL_WINDOW: i32 = 25;
+    const MAX_WINDOW: i32 = 500;
+
     var depth: u32 = 1;
     while (depth <= options.max_depth) : (depth += 1) {
         if (depth > 1) ctx.ageHistory();
 
-        const result = search(board, depth, &ctx);
+        var result: SearchResult = undefined;
+
+        if (depth <= 1) {
+            // Full window for depth 1
+            result = search(board, depth, &ctx);
+        } else {
+            // Aspiration window: start narrow, widen on fail
+            var delta: i32 = INITIAL_WINDOW;
+            var alpha: i32 = best_result.score - delta;
+            var beta: i32 = best_result.score + delta;
+
+            while (true) {
+                result = searchWindow(board, depth, alpha, beta, &ctx);
+                if (ctx.stopped) break;
+
+                if (result.score <= alpha) {
+                    // Fail-low: widen alpha
+                    alpha = if (delta >= MAX_WINDOW) -eval_mod.CHECKMATE_SCORE - 1 else result.score - delta;
+                    delta *= 2;
+                } else if (result.score >= beta) {
+                    // Fail-high: widen beta
+                    beta = if (delta >= MAX_WINDOW) eval_mod.CHECKMATE_SCORE + 1 else result.score + delta;
+                    delta *= 2;
+                } else {
+                    // Score within window
+                    break;
+                }
+
+                // Fall back to full window if delta too large
+                if (delta >= MAX_WINDOW) {
+                    alpha = -eval_mod.CHECKMATE_SCORE - 1;
+                    beta = eval_mod.CHECKMATE_SCORE + 1;
+                }
+            }
+        }
 
         // If stopped mid-search, discard partial result
         if (ctx.stopped) break;
@@ -151,8 +188,13 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
     return best_result;
 }
 
-/// Root-level alpha-beta search.
+/// Root-level alpha-beta search with full window.
 fn search(board: *Board, depth: u32, ctx: *SearchContext) SearchResult {
+    return searchWindow(board, depth, -eval_mod.CHECKMATE_SCORE - 1, eval_mod.CHECKMATE_SCORE + 1, ctx);
+}
+
+/// Root-level alpha-beta search with explicit window bounds.
+fn searchWindow(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchContext) SearchResult {
     const legal = movegen.generateLegalMoves(board);
 
     if (legal.count == 0) {
@@ -174,8 +216,7 @@ fn search(board: *Board, depth: u32, ctx: *SearchContext) SearchResult {
     var scored = scoreMoves(board, legal, tt_move_raw, ctx, 0);
     var best_move: ?Move = null;
     var best_score: i32 = -eval_mod.CHECKMATE_SCORE - 1;
-    var alpha: i32 = -eval_mod.CHECKMATE_SCORE - 1;
-    const beta: i32 = eval_mod.CHECKMATE_SCORE + 1;
+    var alpha: i32 = alpha_in;
 
     for (0..scored.count) |i| {
         pickMove(&scored, i);
@@ -206,12 +247,13 @@ fn search(board: *Board, depth: u32, ctx: *SearchContext) SearchResult {
         if (score > alpha) {
             alpha = score;
         }
+        if (alpha >= beta) break;
     }
 
     // Store root result in TT
     if (ctx.tt) |tt| {
         if (!ctx.stopped) {
-            const flag: TTFlag = .exact;
+            const flag: TTFlag = if (best_score <= alpha_in) .alpha else if (best_score >= beta) .beta else .exact;
             const move_raw: u16 = if (best_move) |m| @bitCast(m) else 0;
             tt.store(board.hash, @intCast(depth), tt_mod.scoreToTT(best_score, 0), flag, move_raw);
         }
