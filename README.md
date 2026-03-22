@@ -362,7 +362,14 @@ The engine uses **iterative deepening** with timeout support, progressively sear
 - **Null move pruning** &mdash; skips a turn and searches at reduced depth (`r = 2 + depth/6`) with a zero-window to detect positions where the opponent can't improve even with a free move. Disabled when in check or in pawn endgames (high zugzwang risk)
 - **Late move reductions (LMR)** &mdash; searches later quiet moves at reduced depth using a log-based reduction table (`0.75 + ln(depth) * ln(moveIndex) / 2.25`). Applied at depth >= 3 after the first 3 moves, excluding captures, promotions, and moves that give check. Re-searches at full depth if the reduced search improves alpha
 - **Quiescence search** &mdash; extends the search at leaf nodes by examining captures only (with stand-pat pruning) to avoid the horizon effect. When in check, searches all evasions and detects checkmate
-- **Move ordering**: TT move > captures (MVV-LVA) > killer moves (2 per ply) > history heuristic. History scores use gravity clamping (`bonus - |entry| * bonus / max`), are aged (halved) between iterations, and quiet moves that fail to cause a beta cutoff receive a malus
+- **Aspiration windows** &mdash; iterative deepening uses a narrow initial window (&plusmn;25 cp) that expands exponentially on fail-high/fail-low, falling back to a full window if delta exceeds &plusmn;500 cp
+- **Principal variation search (PVS)** &mdash; first move searched with full window; subsequent moves use a null window [&alpha;, &alpha;+1] and re-search with full window only if they improve alpha
+- **Check extensions** &mdash; extends search by 1 ply when a move gives check, limited to `ply < 2 * nominal_depth` to prevent explosion
+- **Reverse futility pruning** &mdash; at depth &le; 6, prunes if `static_eval - 80 * depth >= beta` (not in check)
+- **Futility pruning** &mdash; at depths 1&ndash;3, skips quiet non-checking moves if `static_eval + margin < alpha` (margins: 200/350/500 cp by depth)
+- **Static exchange evaluation (SEE)** &mdash; full capture-sequence evaluation used for move ordering (winning captures scored above killers, losing captures below) and pruning (captures with `SEE < -50 * depth` skipped in main search; losing captures skipped in quiescence)
+- **Delta pruning** &mdash; in quiescence, skips captures where `stand_pat + captured_piece_value + 200 < alpha` (unless promotion)
+- **Move ordering**: TT move > captures (MVV-LVA, SEE-partitioned) > killer moves (2 per ply) > history heuristic. History scores use gravity clamping (`bonus - |entry| * bonus / max`), are aged (halved) between iterations, and quiet moves that fail to cause a beta cutoff receive a malus
 
 ### Evaluation
 
@@ -371,6 +378,10 @@ The engine uses **tapered evaluation**, interpolating between middlegame (MG) an
 - **Phase calculation** &mdash; each piece type has a phase weight (knight/bishop = 1, rook = 2, queen = 4; max phase = 24). The final score blends MG and EG proportionally: `(mg * phase + eg * (24 - phase)) / 24`
 - **Material values** &mdash; separate MG and EG values per piece type. Pawns are worth more in endgames (120 vs 100 centipawns); minor pieces slightly less (300/310 vs 320/330)
 - **Piece-square tables** &mdash; separate 64-entry MG and EG tables for all six piece types. Key differences: MG king tables reward castled positions while EG tables reward centralization; EG pawn tables strongly reward advancement. Black uses vertically mirrored tables (`sq ^ 56`)
+- **Pawn structure** &mdash; doubled pawns (&minus;10 MG, &minus;15 EG per extra pawn per file), isolated pawns (&minus;15 MG, &minus;20 EG), and passed pawns with rank-scaled bonuses (up to +100 MG / +200 EG on the 7th rank)
+- **Mobility** &mdash; per-piece bonuses for knights, bishops, rooks, and queens based on safe squares above a baseline (e.g. knight baseline 4, bishop 7, rook 7, queen 14), excluding squares attacked by enemy pawns
+- **King safety** &mdash; pawn shield bonus (+10 per friendly pawn ahead of king) and open file penalty (&minus;15 per open file near king), evaluated in middlegame only
+- **Bishop pair** &mdash; +30 MG / +45 EG bonus when a side has two or more bishops
 
 ### Game State
 
