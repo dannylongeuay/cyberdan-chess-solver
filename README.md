@@ -11,6 +11,7 @@ A bitboard-based chess engine written in Zig. Supports interactive play, full le
 - SAN (Standard Algebraic Notation) and long algebraic move input
 - Game-ending detection: checkmate, stalemate, threefold repetition, fifty-move rule, insufficient material
 - Zobrist hashing with incremental updates for fast position comparison
+- UCI (Universal Chess Interface) protocol for integration with chess GUIs
 - HTTP API server for FEN validation, legal move queries, move submission, and best-move search with CORS support
 
 ## Getting Started
@@ -38,6 +39,7 @@ zig build run                         # build and launch (play mode, default)
 zig build test                        # run all tests
 zig build test-perft                  # run deep perft tests
 zig build run -Doptimize=ReleaseFast  # optimized build
+zig build run -- uci                  # start UCI protocol mode
 zig build run -- serve                # start HTTP API server
 zig build run -- serve --port 3000    # start on custom port
 ```
@@ -69,6 +71,32 @@ In-game commands:
 | `fen`   | Print the current FEN string |
 | `undo`  | Undo the last move (undoes both moves in HvC mode) |
 | `quit`  | Exit the game |
+
+### UCI
+
+The engine supports the [UCI](https://www.chessprogramming.org/UCI) (Universal Chess Interface) protocol, allowing it to be used with any UCI-compatible GUI such as Arena, CuteChess, or Banksia.
+
+```sh
+zig build run -- uci
+```
+
+The engine identifies as **Cyberdan** by **Daniel** and supports the following UCI commands:
+
+| Command | Description |
+|---------|-------------|
+| `uci` | Identify the engine and list options |
+| `isready` | Synchronization ping (responds `readyok`) |
+| `ucinewgame` | Reset the engine state for a new game |
+| `position startpos [moves ...]` | Set the starting position, optionally with moves |
+| `position fen <fen> [moves ...]` | Set a position from a FEN string, optionally with moves |
+| `go depth <n>` | Search to a fixed depth |
+| `go movetime <ms>` | Search for a fixed time in milliseconds |
+| `go wtime/btime/winc/binc/movestogo` | Search with clock-based time management |
+| `go infinite` | Search until `stop` is sent |
+| `stop` | Stop the current search and return the best move found |
+| `quit` | Exit the engine |
+
+When clock information is provided (`wtime`/`btime`), the engine automatically allocates time based on remaining clock and increment values, with a safety margin to avoid flagging.
 
 ### Perft
 
@@ -376,4 +404,5 @@ The engine uses **tapered evaluation**, interpolating between middlegame (MG) an
 | `book.zig` | Opening book lookup |
 | `opening_parser.zig` | Opening book data parsing |
 | `random.zig` | Random move selection (for computer opponent) |
+| `uci.zig` | UCI protocol handler for GUI integration |
 | `server.zig` | HTTP API server with move validation and game state endpoints |
