@@ -19,13 +19,14 @@ pub const search_mod = @import("search.zig");
 pub const tt_mod = @import("tt.zig");
 pub const book = @import("book.zig");
 pub const opening_parser = @import("opening_parser.zig");
+pub const uci_mod = @import("uci.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
 const GameResult = game_mod.GameResult;
 
 const Mode = enum { hvh, hvc };
-const Command = enum { play, perft, serve, parse_openings };
+const Command = enum { play, perft, serve, parse_openings, uci };
 
 pub fn main() !void {
     var args = std.process.args();
@@ -55,6 +56,8 @@ pub fn main() !void {
                 std.debug.print("Usage: cyberdan-chess-solver perft <depth>\n", .{});
                 return;
             }
+        } else if (std.mem.eql(u8, arg, "uci")) {
+            command = .uci;
         } else if (std.mem.eql(u8, arg, "serve")) {
             command = .serve;
         } else if (std.mem.eql(u8, arg, "parse-openings")) {
@@ -151,6 +154,12 @@ pub fn main() !void {
         .serve => {
             server.serve(port) catch |err| {
                 std.debug.print("Server error: {}\n", .{err});
+                return;
+            };
+        },
+        .uci => {
+            uci_mod.run() catch |err| {
+                std.debug.print("UCI error: {}\n", .{err});
                 return;
             };
         },
@@ -337,6 +346,7 @@ fn printUsage() void {
         \\Commands:
         \\  play                              Start a game (default)
         \\  perft <depth>                     Run perft test
+        \\  uci                               Start UCI protocol mode
         \\  serve                             Start HTTP API server
         \\  parse-openings <path> <color>     Parse opening lines to book entries
         \\
@@ -376,4 +386,5 @@ test {
     _ = tt_mod;
     _ = book;
     _ = opening_parser;
+    _ = uci_mod;
 }

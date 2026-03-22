@@ -22,9 +22,20 @@ pub const SearchResult = struct {
     depth: u32,
 };
 
+pub const IterationInfo = struct {
+    depth: u32,
+    score: i32,
+    nodes: u64,
+    time_ms: u64,
+    pv: []const Move,
+    pv_len: usize,
+};
+
 pub const SearchOptions = struct {
     max_depth: u32 = 100,
     timeout_ns: ?u64 = null, // null = no timeout (depth-only)
+    stop_flag: ?*std.atomic.Value(bool) = null,
+    on_iteration: ?*const fn (IterationInfo) void = null,
 };
 
 const MAX_PLY = 128;
@@ -39,6 +50,7 @@ const SearchContext = struct {
     nominal_depth: u32 = 0,
     killers: [MAX_PLY][2]u16 = [_][2]u16{.{ 0, 0 }} ** MAX_PLY,
     history: [2][6][64]i32 = [_][6][64]i32{[_][64]i32{[_]i32{0} ** 64} ** 6} ** 2,
+    stop_flag: ?*std.atomic.Value(bool) = null,
 
     fn init(options: SearchOptions, tt: ?*TranspositionTable) SearchContext {
         return .{
@@ -47,6 +59,7 @@ const SearchContext = struct {
             .timer = if (options.timeout_ns != null) std.time.Timer.start() catch null else null,
             .timeout_ns = options.timeout_ns,
             .tt = tt,
+            .stop_flag = options.stop_flag,
         };
     }
 
@@ -75,6 +88,12 @@ const SearchContext = struct {
     }
 
     fn checkTimeout(self: *SearchContext) void {
+        if (self.stop_flag) |flag| {
+            if (flag.load(.monotonic)) {
+                self.stopped = true;
+                return;
+            }
+        }
         if (self.timeout_ns) |timeout| {
             if (self.timer) |*timer| {
                 if (timer.read() >= timeout) {
@@ -111,6 +130,54 @@ const lmr_table: [64][64]u32 = blk: {
     break :blk table;
 };
 
+/// Extract PV from TT, properly restoring the board.
+fn extractPVWithRestore(board: *Board, tt: *const TranspositionTable, pv_buf: []Move) usize {
+    var count: usize = 0;
+    var undos: [64]board_mod.UndoInfo = undefined;
+    var seen: [64]u64 = undefined;
+
+    while (count < pv_buf.len and count < 64) {
+        // Cycle detection
+        var is_cycle = false;
+        for (seen[0..count]) |h| {
+            if (h == board.hash) {
+                is_cycle = true;
+                break;
+            }
+        }
+        if (is_cycle) break;
+
+        const entry = tt.probe(board.hash) orelse break;
+        if (entry.best_move == 0) break;
+
+        // Validate the TT move is legal
+        const legal = movegen.generateLegalMoves(board);
+        var found_move: ?Move = null;
+        for (legal.slice()) |m| {
+            const raw: u16 = @bitCast(m);
+            if (raw == entry.best_move) {
+                found_move = m;
+                break;
+            }
+        }
+        const move = found_move orelse break;
+
+        seen[count] = board.hash;
+        pv_buf[count] = move;
+        undos[count] = board.makeMove(move);
+        count += 1;
+    }
+
+    // Unmake all moves to restore board state
+    var i: usize = count;
+    while (i > 0) {
+        i -= 1;
+        board.unmakeMove(pv_buf[i], undos[i]);
+    }
+
+    return count;
+}
+
 /// Iterative deepening entry point with aspiration windows.
 pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*TranspositionTable) SearchResult {
     var best_result = SearchResult{
@@ -123,6 +190,7 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
     if (tt) |t| t.newSearch();
 
     var ctx = SearchContext.init(options, tt);
+    var start_timer = std.time.Timer.start() catch null;
 
     const INITIAL_WINDOW: i32 = 25;
     const MAX_WINDOW: i32 = 500;
@@ -174,6 +242,21 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
         best_result = result;
         best_result.depth = depth;
         best_result.nodes = ctx.nodes;
+
+        // Invoke iteration callback with PV info
+        if (options.on_iteration) |callback| {
+            var pv_buf: [64]Move = undefined;
+            const pv_len = if (tt) |t| extractPVWithRestore(board, t, &pv_buf) else 0;
+            const elapsed_ms = if (start_timer) |*st| st.read() / std.time.ns_per_ms else 0;
+            callback(.{
+                .depth = depth,
+                .score = best_result.score,
+                .nodes = ctx.nodes,
+                .time_ms = elapsed_ms,
+                .pv = pv_buf[0..pv_len],
+                .pv_len = pv_len,
+            });
+        }
 
         // Early exit on checkmate found
         if (best_result.score >= eval_mod.CHECKMATE_SCORE - 256 or
