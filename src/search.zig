@@ -383,6 +383,18 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
     // Check if in check (reused for NMP guard and checkmate detection)
     const in_check = board.isInCheck();
 
+    // Static eval for pruning decisions (computed once, reused)
+    const static_eval = if (!in_check) eval_mod.evaluate(board) else @as(i32, 0);
+
+    // Reverse Futility Pruning (static null move pruning):
+    // If our position is so good that even with a margin we still beat beta, prune.
+    if (!in_check and depth <= 6 and
+        static_eval - 80 * @as(i32, @intCast(depth)) >= beta and
+        @abs(beta) < eval_mod.CHECKMATE_SCORE - 256)
+    {
+        return beta;
+    }
+
     // Null Move Pruning
     if (!in_check and allow_null and depth >= 3 and !isPawnEndgame(board)) {
         const r: u32 = 2 + depth / 6;
@@ -413,6 +425,13 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
     var best_move_raw: u16 = 0;
     var best_score: i32 = -eval_mod.CHECKMATE_SCORE - 1;
     var moves_searched: u32 = 0;
+
+    // Futility pruning setup: at low depth, if static eval + margin < alpha,
+    // we can skip quiet non-checking moves (they're unlikely to raise alpha).
+    const futility_margins = [4]i32{ 0, 200, 350, 500 };
+    const can_futility_prune = !in_check and depth >= 1 and depth <= 3 and
+        @abs(alpha) < eval_mod.CHECKMATE_SCORE - 256 and
+        static_eval + futility_margins[depth] < alpha;
     var quiets_searched: [256]Move = undefined;
     var quiets_count: usize = 0;
 
@@ -426,6 +445,12 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         // Late Move Reductions
         const is_quiet = !move.flags.isCapture() and !move.flags.isPromotion();
         const gives_check = board.isInCheck(); // checks side-to-move after makeMove
+
+        // Futility pruning: skip quiet non-checking moves at low depth when eval is far below alpha
+        if (can_futility_prune and moves_searched > 0 and is_quiet and !gives_check) {
+            board.unmakeMove(move, undo);
+            continue;
+        }
 
         // Check extension: search deeper when the move gives check
         const extension: u32 = if (gives_check and ply < 2 * ctx.nominal_depth) 1 else 0;
@@ -543,6 +568,7 @@ fn quiescence(board: *Board, alpha_in: i32, beta: i32, ctx: *SearchContext, ply:
 
         const legal = movegen.generateLegalMoves(board);
         var scored = scoreMoves(board, legal, 0, ctx, ply);
+        const them_idx = @intFromEnum(board.side_to_move) ^ 1;
 
         for (0..scored.count) |i| {
             pickMove(&scored, i);
@@ -550,6 +576,14 @@ fn quiescence(board: *Board, alpha_in: i32, beta: i32, ctx: *SearchContext, ply:
 
             // Only search captures (they are sorted first with positive scores)
             if (!move.flags.isCapture()) break;
+
+            // Delta pruning: skip captures where the captured piece value + margin
+            // can't possibly raise alpha
+            const captured_val = if (move.flags == .ep_capture)
+                eval_mod.piece_values[@intFromEnum(PieceType.pawn)]
+            else
+                eval_mod.piece_values[@intFromEnum(board.getPieceTypeAt(move.to, them_idx))];
+            if (stand_pat + captured_val + 200 < alpha and !move.flags.isPromotion()) continue;
 
             const undo = board.makeMove(move);
             const score = -quiescence(board, -beta, -alpha, ctx, ply + 1);
