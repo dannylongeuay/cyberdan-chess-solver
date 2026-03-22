@@ -32,7 +32,7 @@ pub fn main() !void {
     var args = std.process.args();
     _ = args.next(); // skip program name
 
-    var command: Command = .play;
+    var command: Command = .uci;
     var mode: Mode = .hvh;
     var fen: ?[]const u8 = null;
     var perft_depth: u32 = 0;
@@ -344,9 +344,9 @@ fn printUsage() void {
         \\Usage: cyberdan-chess-solver [command] [options]
         \\
         \\Commands:
-        \\  play                              Start a game (default)
+        \\  play                              Start a game
         \\  perft <depth>                     Run perft test
-        \\  uci                               Start UCI protocol mode
+        \\  uci                               Start UCI protocol mode (default)
         \\  serve                             Start HTTP API server
         \\  parse-openings <path> <color>     Parse opening lines to book entries
         \\
