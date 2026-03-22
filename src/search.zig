@@ -6,6 +6,7 @@ const moves_mod = @import("moves.zig");
 const movegen = @import("movegen.zig");
 const eval_mod = @import("eval.zig");
 const tt_mod = @import("tt.zig");
+const see_mod = @import("see.zig");
 
 const Board = board_mod.Board;
 const Move = moves_mod.Move;
@@ -438,6 +439,15 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
     for (0..scored.count) |i| {
         pickMove(&scored, i);
         const move = scored.moves[i];
+
+        // SEE pruning for captures at shallow depths
+        // scored.scores[i] already contains the SEE value for losing captures (< 10M),
+        // and >= 10M for winning/equal captures (which we never prune).
+        if (!in_check and move.flags.isCapture() and depth <= 3 and moves_searched > 0) {
+            const see_threshold: i32 = -50 * @as(i32, @intCast(depth));
+            if (scored.scores[i] < 10_000_000 and scored.scores[i] < see_threshold) continue;
+        }
+
         const undo = board.makeMove(move);
 
         var score: i32 = undefined;
@@ -585,6 +595,11 @@ fn quiescence(board: *Board, alpha_in: i32, beta: i32, ctx: *SearchContext, ply:
                 eval_mod.piece_values[@intFromEnum(board.getPieceTypeAt(move.to, them_idx))];
             if (stand_pat + captured_val + 200 < alpha and !move.flags.isPromotion()) continue;
 
+            // SEE pruning: skip captures that statically lose material
+            // scored.scores[i] is the raw SEE value for losing captures (< 0),
+            // and >= 10M for winning/equal captures.
+            if (scored.scores[i] < 0) continue;
+
             const undo = board.makeMove(move);
             const score = -quiescence(board, -beta, -alpha, ctx, ply + 1);
             board.unmakeMove(move, undo);
@@ -648,7 +663,6 @@ fn scoreMoves(board: *const Board, legal: MoveList, tt_move_raw: u16, ctx: *cons
     result.count = legal.count;
 
     const us_idx = @intFromEnum(board.side_to_move);
-    const them_idx = us_idx ^ 1;
 
     for (0..legal.count) |i| {
         const move = legal.moves[i];
@@ -659,16 +673,14 @@ fn scoreMoves(board: *const Board, legal: MoveList, tt_move_raw: u16, ctx: *cons
         if (tt_move_raw != 0 and move_raw == tt_move_raw) {
             result.scores[i] = 20_000_000;
         } else if (move.flags.isCapture()) {
-            const attacker = board.getPieceTypeAt(move.from, us_idx);
-            const attacker_val = eval_mod.piece_values[@intFromEnum(attacker)];
-
-            // En passant: victim is always a pawn
-            const victim_val = if (move.flags == .ep_capture)
-                eval_mod.piece_values[@intFromEnum(PieceType.pawn)]
-            else
-                eval_mod.piece_values[@intFromEnum(board.getPieceTypeAt(move.to, them_idx))];
-
-            result.scores[i] = 10_000_000 + victim_val * 100 - attacker_val;
+            const see_val = see_mod.see(board, move);
+            if (see_val >= 0) {
+                // Winning/equal captures: ordered by SEE value (e.g. PxQ > RxQ)
+                result.scores[i] = 10_000_000 + see_val;
+            } else {
+                // Losing captures: below killers and history
+                result.scores[i] = see_val;
+            }
         } else if (ply < MAX_PLY and (move_raw == ctx.killers[ply][0] or move_raw == ctx.killers[ply][1])) {
             // Killer moves score below captures but above history
             result.scores[i] = 9_000_000;
