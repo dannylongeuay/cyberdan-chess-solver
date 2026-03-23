@@ -60,7 +60,10 @@ pub fn run() !void {
         if (std.mem.eql(u8, cmd, "uci")) {
             sendLine("id name Cyberdan");
             sendLine("id author Daniel");
+            sendLine("option name Hash type spin default 64 min 1 max 4096");
             sendLine("uciok");
+        } else if (std.mem.eql(u8, cmd, "setoption")) {
+            handleSetOption(&iter);
         } else if (std.mem.eql(u8, cmd, "isready")) {
             sendLine("readyok");
         } else if (std.mem.eql(u8, cmd, "ucinewgame")) {
@@ -68,6 +71,7 @@ pub fn run() !void {
             global_state.tt.clear();
             global_state.board = Board.init();
         } else if (std.mem.eql(u8, cmd, "position")) {
+            stopSearch();
             handlePosition(&iter);
         } else if (std.mem.eql(u8, cmd, "go")) {
             handleGo(&iter);
@@ -124,7 +128,12 @@ fn handlePosition(iter: *std.mem.TokenIterator(u8, .scalar)) void {
 
 fn applyMoves(iter: *std.mem.TokenIterator(u8, .scalar)) void {
     while (iter.next()) |move_str| {
-        const move = notation.parseMove(move_str, &global_state.board) orelse return;
+        const move = notation.parseMove(move_str, &global_state.board) orelse {
+            var msg_buf: [64]u8 = undefined;
+            const msg = std.fmt.bufPrint(&msg_buf, "info string invalid move: {s}", .{move_str}) catch return;
+            sendLine(msg);
+            return;
+        };
         _ = global_state.board.makeMove(move);
     }
 }
@@ -145,9 +154,9 @@ fn handleGo(iter: *std.mem.TokenIterator(u8, .scalar)) void {
         } else if (std.mem.eql(u8, token, "movetime")) {
             if (iter.next()) |v| movetime = std.fmt.parseInt(u64, v, 10) catch null;
         } else if (std.mem.eql(u8, token, "wtime")) {
-            if (iter.next()) |v| wtime = std.fmt.parseInt(u64, v, 10) catch null;
+            if (iter.next()) |v| wtime = clampTime(v);
         } else if (std.mem.eql(u8, token, "btime")) {
-            if (iter.next()) |v| btime = std.fmt.parseInt(u64, v, 10) catch null;
+            if (iter.next()) |v| btime = clampTime(v);
         } else if (std.mem.eql(u8, token, "winc")) {
             if (iter.next()) |v| winc = std.fmt.parseInt(u64, v, 10) catch 0;
         } else if (std.mem.eql(u8, token, "binc")) {
@@ -176,15 +185,14 @@ fn handleGo(iter: *std.mem.TokenIterator(u8, .scalar)) void {
             } else {
                 alloc = ot / 30 + our_inc * 3 / 4;
             }
-            // Subtract safety margin
-            alloc = if (alloc > 50) alloc - 50 else 0;
-            // Clamp
-            alloc = @max(10, alloc);
-            if (ot > 50) {
-                alloc = @min(alloc, ot - 50);
+            // Safety margin: reserve 10% of remaining time, minimum 10ms
+            const margin = @max(ot / 10, 10);
+            if (ot > margin) {
+                alloc = @min(alloc, ot - margin);
             } else {
-                alloc = @min(alloc, 10);
+                alloc = 1; // critically low — spend minimal time
             }
+            alloc = @max(1, alloc);
             timeout_ns = alloc * std.time.ns_per_ms;
         }
     }
@@ -245,8 +253,9 @@ fn onIteration(info: search_mod.IterationInfo) void {
     const nps = if (info.time_ms > 0) info.nodes * 1000 / info.time_ms else info.nodes;
 
     // Build info string
-    const header = std.fmt.bufPrint(buf[pos..], "info depth {d} {s} nodes {d} nps {d} time {d}", .{
+    const header = std.fmt.bufPrint(buf[pos..], "info depth {d} seldepth {d} {s} nodes {d} nps {d} time {d}", .{
         info.depth,
+        info.seldepth,
         score_str,
         info.nodes,
         nps,
@@ -274,6 +283,32 @@ fn onIteration(info: search_mod.IterationInfo) void {
     }
 
     sendLine(buf[0..pos]);
+}
+
+fn handleSetOption(iter: *std.mem.TokenIterator(u8, .scalar)) void {
+    // Expected format: name <name> value <value>
+    const name_token = iter.next() orelse return;
+    if (!std.mem.eql(u8, name_token, "name")) return;
+    const opt_name = iter.next() orelse return;
+    const value_token = iter.next() orelse return;
+    if (!std.mem.eql(u8, value_token, "value")) return;
+    const opt_value = iter.next() orelse return;
+
+    if (std.ascii.eqlIgnoreCase(opt_name, "hash")) {
+        const size_mb = std.fmt.parseInt(u32, opt_value, 10) catch return;
+        const clamped = std.math.clamp(size_mb, 1, 4096);
+        stopSearch();
+        const new_tt = TranspositionTable.init(std.heap.page_allocator, clamped) catch return;
+        global_state.tt.deinit();
+        global_state.tt.* = new_tt;
+    }
+}
+
+/// Parse a time value (possibly negative from GUIs), clamp to minimum 100ms.
+fn clampTime(str: []const u8) ?u64 {
+    const val = std.fmt.parseInt(i64, str, 10) catch return null;
+    if (val < 100) return 100;
+    return @intCast(val);
 }
 
 fn stopSearch() void {

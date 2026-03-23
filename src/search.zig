@@ -25,6 +25,7 @@ pub const SearchResult = struct {
 
 pub const IterationInfo = struct {
     depth: u32,
+    seldepth: u32,
     score: i32,
     nodes: u64,
     time_ms: u64,
@@ -44,6 +45,7 @@ const MAX_HISTORY: i32 = 16384;
 
 const SearchContext = struct {
     nodes: u64 = 0,
+    seldepth: u32 = 0,
     stopped: bool = false,
     timer: ?std.time.Timer = null,
     timeout_ns: ?u64 = null,
@@ -200,6 +202,7 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
     while (depth <= options.max_depth) : (depth += 1) {
         if (depth > 1) ctx.ageHistory();
         ctx.nominal_depth = depth;
+        ctx.seldepth = 0;
 
         var result: SearchResult = undefined;
 
@@ -251,6 +254,7 @@ pub fn searchIterative(board: *Board, options: SearchOptions, tt: ?*Transpositio
             const elapsed_ms = if (start_timer) |*st| st.read() / std.time.ns_per_ms else 0;
             callback(.{
                 .depth = depth,
+                .seldepth = ctx.seldepth,
                 .score = best_result.score,
                 .nodes = ctx.nodes,
                 .time_ms = elapsed_ms,
@@ -356,6 +360,7 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
         return quiescence(board, alpha_in, beta, ctx, ply);
     }
 
+    if (ply > ctx.seldepth) ctx.seldepth = ply;
     ctx.incrementNodes();
 
     var alpha = alpha_in;
@@ -561,6 +566,7 @@ fn negamax(board: *Board, depth: u32, alpha_in: i32, beta: i32, ctx: *SearchCont
 fn quiescence(board: *Board, alpha_in: i32, beta: i32, ctx: *SearchContext, ply: u32) i32 {
     if (ctx.stopped) return 0;
 
+    if (ply > ctx.seldepth) ctx.seldepth = ply;
     ctx.incrementNodes();
 
     const in_check = board.isInCheck();
