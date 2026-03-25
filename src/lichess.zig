@@ -92,6 +92,7 @@ pub fn run() !void {
         const init_alloc = init_arena.allocator();
 
         const account_body = try apiFetch(init_alloc, token, "/api/account", .GET, null);
+        std.debug.print("Account Body: {s}\n", .{account_body});
         const account = std.json.parseFromSliceLeaky(AccountInfo, init_alloc, account_body, .{
             .ignore_unknown_fields = true,
         }) catch {
@@ -142,7 +143,10 @@ fn streamEvents(alloc: std.mem.Allocator, token: []const u8, bot_id: []const u8,
     const auth_value = std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{token}) catch return error.AuthTooLong;
 
     var req = try client.request(.GET, uri, .{
-        .headers = .{ .authorization = .{ .override = auth_value } },
+        .headers = .{
+            .authorization = .{ .override = auth_value },
+            .accept_encoding = .{ .override = "identity" },
+        },
         .extra_headers = &.{.{ .name = "accept", .value = "application/x-ndjson" }},
         .keep_alive = false,
         .redirect_behavior = .unhandled,
@@ -291,7 +295,10 @@ fn playGame(game_id: []const u8, token: []const u8, bot_id: []const u8, tt: *Tra
     const auth_value = std.fmt.bufPrint(&auth_buf, "Bearer {s}", .{token}) catch return;
 
     var req = try client.request(.GET, uri, .{
-        .headers = .{ .authorization = .{ .override = auth_value } },
+        .headers = .{
+            .authorization = .{ .override = auth_value },
+            .accept_encoding = .{ .override = "identity" },
+        },
         .extra_headers = &.{.{ .name = "accept", .value = "application/x-ndjson" }},
         .keep_alive = false,
         .redirect_behavior = .unhandled,
@@ -528,6 +535,7 @@ fn apiFetch(alloc: std.mem.Allocator, token: []const u8, path: []const u8, metho
         .headers = .{
             .authorization = .{ .override = auth_value },
             .content_type = if (body != null) .{ .override = "application/x-www-form-urlencoded" } else .default,
+            .accept_encoding = .{ .override = "identity" },
         },
         .extra_headers = &.{.{ .name = "accept", .value = "application/json" }},
         .keep_alive = false,
