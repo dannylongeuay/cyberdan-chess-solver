@@ -12,6 +12,7 @@ A bitboard-based chess engine written in Zig. Supports interactive play, full le
 - Game-ending detection: checkmate, stalemate, threefold repetition, fifty-move rule, insufficient material
 - Zobrist hashing with incremental updates for fast position comparison
 - UCI (Universal Chess Interface) protocol for integration with chess GUIs
+- Lichess bot mode for automated online play
 - HTTP API server for FEN validation, legal move queries, move submission, and best-move search with CORS support
 
 ## Getting Started
@@ -40,6 +41,7 @@ zig build test                        # run all tests
 zig build test-perft                  # run deep perft tests
 zig build run -Doptimize=ReleaseFast  # optimized build
 zig build run -- uci                  # start UCI protocol mode
+zig build run -- lichess              # start Lichess bot mode
 zig build run -- serve                # start HTTP API server
 zig build run -- serve --port 3000    # start on custom port
 ```
@@ -97,6 +99,30 @@ The engine identifies as **Cyberdan** by **Daniel** and supports the following U
 | `quit` | Exit the engine |
 
 When clock information is provided (`wtime`/`btime`), the engine automatically allocates time based on remaining clock and increment values, with a safety margin to avoid flagging.
+
+### Lichess Bot
+
+Challenge the bot [here](https://lichess.org/?user=cyberdan-chess#friend)
+
+The engine can run as a [Lichess bot](https://lichess.org/api#tag/Bot), connecting to Lichess to stream events, accept challenges, and play games automatically.
+
+**Prerequisites:** A Lichess bot account and a personal API token with the `bot:play` scope. You can create a token from your Lichess account settings.
+
+```sh
+LICHESS_TOKEN=lip_xxx zig build run -- lichess
+```
+
+**Challenge acceptance:** The bot accepts challenges that are **unrated**, **standard** variant, and **bullet/blitz/rapid** time controls. It plays one game at a time and declines challenges while a game is in progress.
+
+**Behaviors:**
+
+- Sends "Good luck, have fun!" in chat at the start of each game
+- Uses the opening book when a book move is available
+- Automatically declines draw and takeback offers from the opponent
+- Claims victory when the opponent disconnects
+- Auto-reconnects to the event stream on connection errors (5-second backoff)
+
+**Time management:** The bot allocates time from the remaining clock (`time / 30 + increment * 3/4`) with a safety margin to avoid flagging. Falls back to 10 seconds per move if no clock info is provided.
 
 ### Perft
 
@@ -416,4 +442,5 @@ The engine uses **tapered evaluation**, interpolating between middlegame (MG) an
 | `opening_parser.zig` | Opening book data parsing |
 | `random.zig` | Random move selection (for computer opponent) |
 | `uci.zig` | UCI protocol handler for GUI integration |
+| `lichess.zig` | Lichess bot: event streaming, challenge handling, game play |
 | `server.zig` | HTTP API server with move validation and game state endpoints |
