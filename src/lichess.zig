@@ -92,7 +92,6 @@ pub fn run() !void {
         const init_alloc = init_arena.allocator();
 
         const account_body = try apiFetch(init_alloc, token, "/api/account", .GET, null);
-        std.debug.print("Account Body: {s}\n", .{account_body});
         const account = std.json.parseFromSliceLeaky(AccountInfo, init_alloc, account_body, .{
             .ignore_unknown_fields = true,
         }) catch {
@@ -164,11 +163,14 @@ fn streamEvents(alloc: std.mem.Allocator, token: []const u8, bot_id: []const u8,
         return error.ApiError;
     }
 
-    var transfer_buf: [64]u8 = undefined;
+    var transfer_buf: [16384]u8 = undefined;
     const body_reader = response.reader(&transfer_buf);
 
     while (running.load(.monotonic)) {
-        const line = body_reader.takeDelimiter('\n') catch break orelse break;
+        const line = body_reader.takeDelimiter('\n') catch |err| {
+            std.debug.print("Event stream read error: {}\n", .{err});
+            break;
+        } orelse break;
         if (line.len == 0) continue; // keepalive
 
         const event = std.json.parseFromSliceLeaky(StreamEvent, alloc, line, .{
@@ -315,11 +317,14 @@ fn playGame(game_id: []const u8, token: []const u8, bot_id: []const u8, tt: *Tra
         return error.ApiError;
     }
 
-    var transfer_buf: [64]u8 = undefined;
+    var transfer_buf: [16384]u8 = undefined;
     const body_reader = response.reader(&transfer_buf);
 
     // First line should be gameFull
-    const first_line = body_reader.takeDelimiter('\n') catch return orelse return;
+    const first_line = body_reader.takeDelimiter('\n') catch |err| {
+        std.debug.print("Game stream read error: {}\n", .{err});
+        return;
+    } orelse return;
     if (first_line.len == 0) return;
 
     const game_full = std.json.parseFromSliceLeaky(GameFull, alloc, first_line, .{
@@ -350,7 +355,10 @@ fn playGame(game_id: []const u8, token: []const u8, bot_id: []const u8, tt: *Tra
 
     // Read subsequent events
     while (running.load(.monotonic)) {
-        const line = body_reader.takeDelimiter('\n') catch break orelse break;
+        const line = body_reader.takeDelimiter('\n') catch |err| {
+            std.debug.print("Game stream read error: {}\n", .{err});
+            break;
+        } orelse break;
         if (line.len == 0) continue;
 
         // Parse event type via JSON before dispatching
@@ -568,7 +576,7 @@ fn apiFetch(alloc: std.mem.Allocator, token: []const u8, path: []const u8, metho
     }
 
     if (method.responseHasBody()) {
-        var transfer_buf: [64]u8 = undefined;
+        var transfer_buf: [4096]u8 = undefined;
         const r = response.reader(&transfer_buf);
         return r.allocRemaining(alloc, .unlimited);
     }
