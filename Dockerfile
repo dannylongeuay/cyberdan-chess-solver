@@ -27,6 +27,7 @@ LABEL org.opencontainers.image.title="cyberdan-chess-solver" \
 
 ENV CORS_PERMISSIVE=""
 
+COPY --from=build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /src/zig-out/bin/cyberdan-chess-solver /cyberdan-chess-solver
 
 USER 65534:65534
