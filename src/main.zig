@@ -20,13 +20,14 @@ pub const tt_mod = @import("tt.zig");
 pub const book = @import("book.zig");
 pub const opening_parser = @import("opening_parser.zig");
 pub const uci_mod = @import("uci.zig");
+pub const lichess_mod = @import("lichess.zig");
 
 const Board = board_mod.Board;
 const GameState = game_mod.GameState;
 const GameResult = game_mod.GameResult;
 
 const Mode = enum { hvh, hvc };
-const Command = enum { play, perft, serve, parse_openings, uci };
+const Command = enum { play, perft, serve, parse_openings, uci, lichess };
 
 pub fn main() !void {
     var args = std.process.args();
@@ -58,6 +59,8 @@ pub fn main() !void {
             }
         } else if (std.mem.eql(u8, arg, "uci")) {
             command = .uci;
+        } else if (std.mem.eql(u8, arg, "lichess")) {
+            command = .lichess;
         } else if (std.mem.eql(u8, arg, "serve")) {
             command = .serve;
         } else if (std.mem.eql(u8, arg, "parse-openings")) {
@@ -161,6 +164,11 @@ pub fn main() !void {
             uci_mod.run() catch |err| {
                 std.debug.print("UCI error: {}\n", .{err});
                 return;
+            };
+        },
+        .lichess => {
+            lichess_mod.run() catch |err| {
+                std.debug.print("Lichess error: {}\n", .{err});
             };
         },
         .parse_openings => {
@@ -348,6 +356,7 @@ fn printUsage() void {
         \\  perft <depth>                     Run perft test
         \\  uci                               Start UCI protocol mode (default)
         \\  serve                             Start HTTP API server
+        \\  lichess                           Run as Lichess bot (needs LICHESS_TOKEN env var)
         \\  parse-openings <path> <color>     Parse opening lines to book entries
         \\
         \\Options for play:
@@ -387,4 +396,5 @@ test {
     _ = book;
     _ = opening_parser;
     _ = uci_mod;
+    _ = lichess_mod;
 }
